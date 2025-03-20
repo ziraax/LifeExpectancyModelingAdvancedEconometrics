@@ -56,6 +56,12 @@ library(tidyverse)
 
 # Déscription des données
 
+Dans le cadre de ce modèle, nous avons sélectionné un ensemble de variables clés influençant l'espérance de vie, tirées de la Banque mondiale. Ces variables couvrent plusieurs dimensions essentielles de l'économie et de la société. Le **PIB par habitant** (en parité de pouvoir d'achat) est choisi comme mesure de la richesse d'un pays, influençant directement l'accès aux soins et aux services essentiels. Les **dépenses de santé par habitant**, également en parité de pouvoir d'achat, mesurent l'engagement d'un pays dans son système de santé et son impact sur la longévité. Le **niveau d'éducation**, représenté par la proportion de la population ayant un diplôme équivalent au baccalauréat, est une variable importante, car l'éducation est étroitement liée à une meilleure santé et à une espérance de vie plus longue. En parallèle, nous incluons des indicateurs environnementaux tels que la **pollution de l'air**, mesurée par l'exposition moyenne aux PM2.5, qui a un impact direct sur la santé publique. Enfin, le **contrôle de la corruption** reflète la qualité des institutions et la gouvernance, des facteurs essentiels pour le bon fonctionnement des systèmes de santé et des infrastructures publiques. Ces variables ont été choisies en raison de leur pertinence théorique et de la disponibilité des données à l’échelle internationale.
+
+$$
+\begin{array}{|l|l|l|l|}\hline\textbf{Variable} & \textbf{Description} & \textbf{Code} & \textbf{Source} \\\hline\text{Country Name} & \text{Nom du pays} & \text{Country Name} & \text{Banque mondiale} \\\text{Country Code} & \text{Code pays (ISO 3166-1 alpha-3)} & \text{Country Code} & \text{Banque mondiale} \\\text{Control of Corruption: Estimate} & \text{Estimation du contrôle de la corruption, mesure de la gouvernance} & \text{Control of Corruption: Estimate} & \text{Banque mondiale} \\\text{Current health expenditure per capita, PPP (current international \$)} & \text{Dépenses de santé par habitant, en parité de pouvoir d'achat (PPA)} & \text{Current health expenditure per capita, PPP (current international \$)} & \text{Banque mondiale} \\\text{Educational attainment, at least Bachelor's or equivalent, population 25+, total (\%)} & \text{Pourcentage de la population âgée de 25 ans et plus ayant un niveau d'éducation équivalent au baccalauréat ou plus} & \text{Educational attainment, at least Bachelor's or equivalent, population 25+, total (\%)} & \text{Banque mondiale} \\\text{GDP per capita, PPP (constant 2021 international \$)} & \text{PIB par habitant, en parité de pouvoir d'achat, en dollars constants 2021} & \text{GDP per capita, PPP (constant 2021 international \$)} & \text{Banque mondiale} \\\text{Life expectancy at birth, total (years)} & \text{Espérance de vie à la naissance, en années} & \text{Life expectancy at birth, total (years)} & \text{Banque mondiale} \\\text{PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)} & \text{Pollution de l'air (PM2.5), exposition annuelle moyenne en microgrammes par mètre cube} & \text{PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)} & \text{Banque mondiale} \\\hline\end{array}
+$$
+
 # Prétraitement des données
 
 ```{r}
@@ -85,6 +91,10 @@ print(dim(df_wide))
 
 # Sauvegarder le fichier transformé
 write.csv(df_wide, "./DATA/data_transformed_clean.csv", row.names = FALSE)
+```
+
+```{r}
+colnames(data)
 ```
 
 # Statistiques descriptives
