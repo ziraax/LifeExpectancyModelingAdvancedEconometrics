@@ -1,0 +1,7 @@
+"0",""
+"0","# Boxplot"
+"0","ggplot(data, aes(y = `Life expectancy at birth, total (years)`)) +"
+"0","  geom_boxplot(fill = ""red"", alpha = 0.6) +"
+"0","  labs(title = ""Boxplot de l'espérance de vie"", y = ""Espérance de vie"") +"
+"0","  theme_minimal()"
+"0",""

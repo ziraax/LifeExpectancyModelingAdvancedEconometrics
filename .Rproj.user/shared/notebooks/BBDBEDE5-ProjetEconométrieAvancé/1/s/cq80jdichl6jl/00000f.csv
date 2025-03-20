@@ -1,0 +1,8 @@
+"0","# Espérance de vie vs PIB par habitant"
+"0","ggplot(data, aes(x = `GDP per capita, PPP (constant 2021 international $)`, "
+"0","                     y = `Life expectancy at birth, total (years)`)) +"
+"0","  geom_point(alpha = 0.7, color = ""blue"") +"
+"0","  geom_smooth(method = ""lm"", color = ""red"", se = FALSE) +"
+"0","  labs(title = ""Espérance de vie vs PIB par habitant"", "
+"0","       x = ""PIB par habitant (PPP, $)"", y = ""Espérance de vie"") +"
+"0","  theme_minimal()"

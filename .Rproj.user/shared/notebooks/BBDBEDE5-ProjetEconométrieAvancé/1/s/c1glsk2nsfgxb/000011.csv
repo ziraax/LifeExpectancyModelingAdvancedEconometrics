@@ -1,0 +1,20 @@
+"0","glimpse(data)"
+"1","Rows: 154"
+"1",""
+"1","
+"
+"1","Columns: 8"
+"1",""
+"1","
+"
+"1","$ `Country Name`                                                                                      [3m[38;5;246m<chr>[39m[23m ""Afghanistan"", ""Albania"", ""Algeria"", ""Angola"", ""Armenia…
+$ `Country Code`                                                                                      [3m[38;5;246m<chr>[39m[23m ""AFG"", ""ALB"", ""DZA"", ""AGO"", ""ARM"", ""AUS"", ""AUT"", ""AZE"",…
+$ `Control of Corruption: Estimate`                                                                   [3m[38;5;246m<dbl>[39m[23m -1.15493178, -0.33221853, -0.58930832, -0.60992020, 0.0…
+$ `Current health expenditure per capita, PPP (current international $)`                              [3m[38;5;246m<dbl>[39m[23m 321.49908, 981.87902, 710.99587, 173.14369, 1698.00000,…
+$ `Educational attainment, at least Bachelor's or equivalent, population 25+, total (%) (cumulative)` [3m[38;5;246m<dbl>[39m[23m 3.98425007, 19.83464432, 11.43593025, 0.08834819, 28.29…
+$ `GDP per capita, PPP (constant 2021 international $)`                                               [3m[38;5;246m<dbl>[39m[23m 1992.4244, 17975.7984, 15159.3242, 7244.8931, 19230.189…
+$ `Life expectancy at birth, total (years)`                                                           [3m[38;5;246m<dbl>[39m[23m 62.87900, 76.83300, 77.12900, 61.92900, 73.37200, 83.20…
+$ `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`                            [3m[38;5;246m<dbl>[39m[23m 58.330872, 15.704707, 24.388609, 24.598811, 32.661824, …"
+"1",""
+"1","
+"

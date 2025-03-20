@@ -1,0 +1,161 @@
+# Introduction
+
+L’espérance de vie constitue un indicateur clé du développement d’un pays, reflétant l’état de santé de la population et la qualité des infrastructures socio-économiques. De nombreux travaux en économie de la santé mettent en évidence l’influence de facteurs tels que le revenu par habitant, la dépense de santé, le niveau d’éducation ou encore la qualité de l’environnement sur la durée de vie moyenne. Cependant, ces relations sont souvent sujettes à des biais économétriques, notamment liés à l’endogénéité de certaines variables explicatives.
+
+Dans ce projet, nous nous attachons à modéliser l’espérance de vie en utilisant un modèle structurel intégrant ces déterminants. Nous identifierons et corrigerons le biais d’endogénéité à l’aide de la méthode des doubles moindres carrés (2SLS), en recourant à des variables instrumentales appropriées. Nous nous assurerons également que notre modèle est bien identifié et vérifierons la pertinence des instruments à travers des tests statistiques (test de Durbin-Wu-Hausman, test de suridentification de Sargan-Hansen).
+
+Par la suite, nous nous intéresserons au problème de la multicolinéarité, une autre source potentielle de distorsion dans l’interprétation des coefficients estimés. Pour y remédier, nous utiliserons des techniques de régularisation et d’analyse des corrélations entre variables explicatives. Enfin, nous explorerons l’utilisation du Double Machine Learning (DML), une approche récente permettant d’estimer des effets causaux tout en tenant compte d’un grand nombre de variables explicatives et en corrigeant les biais liés à l’endogénéité et aux interactions complexes entre variables.
+
+Ce projet vise ainsi à allier des approches économétriques classiques et des méthodes d’apprentissage statistique avancées pour améliorer la robustesse des estimations et mieux comprendre les déterminants de l’espérance de vie.
+
+# Forme structurelle du modèle proposé
+
+L'espérance de vie ($LE$) dépend de plusieurs facteurs économiques, éducatifs et environnementaux.
+
+Nous proposons le modèle suivant, inspiré de la littérature :
+
+$$
+    LE_i = \beta_0 + \beta_1 GDP_i + \beta_2 HE_i + \beta_3 EDU_i + \beta_4 ENV_i + u_i
+$$
+
+où :
+
+-   $LE_i$ est l'espérance de vie dans le pays $$i$$
+
+-   $GDP_i$ est le PIB par habitant
+
+-   $HE_i$ est la dépense de santé par habitant
+
+-   $EDU_i$ est le niveau moyen d'éducation
+
+-   $ENV_i$ est un indicateur de qualité environnementale
+
+-   $u_i$ est le terme d'erreur capturant les facteurs non observés.
+
+Cependant, la dépense de santé ($HE$) peut être endogène (ce que nous verifierons). Nous introduisons donc une seconde équation expliquant $HE_i$ à l’aide d’instruments :
+
+$$
+\begin{equation}    HE_i = \gamma_0 + \gamma_1 GDP_i + \gamma_2 EDU_i + \gamma_3 POL_i + v_i\end{equation}
+$$
+
+-   $POL_i$ représente la qualité institutionelle ou politique
+
+-   $v_i$ est le terme d'erreur spécifique à cette équation.
+
+L'endogénéité de $HE_i$ implique que $E[u_i | HE_i] \neq 0$, justifiant l'utilisation de la méthode des doubles moindres carrés (2SLS) pour estimer correctement les coefficients.
+
+# Import des librairies
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+
+```
+
+# Déscription des données
+
+# Prétraitement des données
+
+```{r}
+df <- read_delim("DATA/Data.csv")
+df
+```
+
+```{r}
+# Filtrer pour ne garder qu'une seule année (par exemple, la plus récente disponible)
+df_clean <- df %>%
+  pivot_longer(cols = starts_with("20"), 
+               names_to = "Year", 
+               values_to = "Value") %>%
+  filter(!is.na(Value)) %>%
+  group_by(`Country Name`, `Country Code`, `Series Name`, `Series Code`) %>%
+  slice_max(Year) %>%  # Prend la dernière année disponible
+  ungroup()
+
+# Transformer les séries en colonnes
+df_wide <- df_clean %>%
+  select(-Year, -`Series Code`) %>%
+  pivot_wider(names_from = `Series Name`, values_from = Value) %>%
+  drop_na()  # Supprime les lignes contenant des NA
+
+# Afficher la dimension du dataset final
+print(dim(df_wide))
+
+# Sauvegarder le fichier transformé
+write.csv(df_wide, "./DATA/data_transformed_clean.csv", row.names = FALSE)
+```
+
+# Statistiques descriptives
+
+```{r}
+data <- read_delim("DATA/data_transformed_clean.csv")
+```
+
+```{r}
+glimpse(data)
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+
+# Statistiques descriptives pour l'espérance de vie
+summary(data$`Life expectancy at birth, total (years)`)
+sd(data$`Life expectancy at birth, total (years)`, na.rm = TRUE)
+
+# Histogramme
+ggplot(data, aes(x = `Life expectancy at birth, total (years)`)) +
+  geom_histogram(bins = 20, fill = "blue", alpha = 0.6) +
+  labs(title = "Distribution de l'espérance de vie", x = "Espérance de vie", y = "Fréquence") +
+  theme_minimal()
+
+# Boxplot
+ggplot(data, aes(y = `Life expectancy at birth, total (years)`)) +
+  geom_boxplot(fill = "red", alpha = 0.6) +
+  labs(title = "Boxplot de l'espérance de vie", y = "Espérance de vie") +
+  theme_minimal()
+
+```
+
+```{r}
+# Espérance de vie vs PIB par habitant
+ggplot(data, aes(x = `GDP per capita, PPP (constant 2021 international $)`, 
+                     y = `Life expectancy at birth, total (years)`)) +
+  geom_point(alpha = 0.7, color = "blue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Espérance de vie vs PIB par habitant", 
+       x = "PIB par habitant (PPP, $)", y = "Espérance de vie") +
+  theme_minimal()
+
+# Espérance de vie vs Dépenses de santé
+ggplot(data, aes(x = `Current health expenditure per capita, PPP (current international $)`, 
+                     y = `Life expectancy at birth, total (years)`)) +
+  geom_point(alpha = 0.7, color = "green") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Espérance de vie vs Dépenses de santé", 
+       x = "Dépenses de santé ($ PPP)", y = "Espérance de vie") +
+  theme_minimal()
+
+# Espérance de vie vs Pollution PM2.5
+ggplot(data, aes(x = `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`, 
+                     y = `Life expectancy at birth, total (years)`)) +
+  geom_point(alpha = 0.7, color = "purple") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Espérance de vie vs Pollution de l'air (PM2.5)", 
+       x = "Exposition annuelle PM2.5", y = "Espérance de vie") +
+  theme_minimal()
+
+
+```
+
+# Traitement de l'endogénéité
+
+# Traitement de la multicolinéarité
+
+# Surement quelque chose ici
+
+# Conclusion
