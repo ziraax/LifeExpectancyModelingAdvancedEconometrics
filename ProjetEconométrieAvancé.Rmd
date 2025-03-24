@@ -2,7 +2,7 @@
 
 L’espérance de vie constitue un indicateur clé du développement d’un pays, reflétant l’état de santé de la population et la qualité des infrastructures socio-économiques. De nombreux travaux en économie de la santé mettent en évidence l’influence de facteurs tels que le revenu par habitant, la dépense de santé, le niveau d’éducation ou encore la qualité de l’environnement sur la durée de vie moyenne. Cependant, ces relations sont souvent sujettes à des biais économétriques, notamment liés à l’endogénéité de certaines variables explicatives.
 
-Dans ce projet, nous nous attachons à modéliser l’espérance de vie en utilisant un modèle structurel intégrant ces déterminants. Nous identifierons et corrigerons le biais d’endogénéité à l’aide de la méthode des doubles moindres carrés (2SLS), en recourant à des variables instrumentales appropriées. Nous nous assurerons également que notre modèle est bien identifié et vérifierons la pertinence des instruments à travers des tests statistiques (test de Durbin-Wu-Hausman, test de suridentification de Sargan-Hansen).
+Dans ce projet, nous nous attachons à modéliser l’espérance de vie en utilisant un modèle structurel intégrant ces déterminants. Nous identifierons et corrigerons le biais d’endogénéité à l’aide de la méthode des doubles moindres carrés (2SLS), en recourant à des variables instrumentales appropriées. Nous nous assurerons également que notre modèle est bien identifié et vérifierons la pertinence des instruments à travers des tests statistiques.
 
 Par la suite, nous nous intéresserons au problème de la multicolinéarité, une autre source potentielle de distorsion dans l’interprétation des coefficients estimés. Pour y remédier, nous utiliserons des techniques de régularisation et d’analyse des corrélations entre variables explicatives. Enfin, nous explorerons l’utilisation du Double Machine Learning (DML), une approche récente permettant d’estimer des effets causaux tout en tenant compte d’un grand nombre de variables explicatives et en corrigeant les biais liés à l’endogénéité et aux interactions complexes entre variables.
 
@@ -20,7 +20,7 @@ $$
 
 où :
 
--   $LE_i$ est l'espérance de vie dans le pays $$i$$
+-   $LE_i$ est l'espérance de vie
 
 -   $GDP_i$ est le PIB par habitant
 
@@ -86,6 +86,22 @@ df_wide <- df_clean %>%
   pivot_wider(names_from = `Series Name`, values_from = Value) %>%
   drop_na()  # Supprime les lignes contenant des NA
 
+# Pour plus de simplicité, renommage des colonnes
+df_wide <- df_wide %>% 
+  rename(
+    Country_Name = `Country Name`,
+    Country_code = `Country Code`,
+    Corruption = `Control of Corruption: Estimate`,
+    Health_Expenditure = `Current health expenditure per capita, PPP (current international $)`,
+    Education = `Educational attainment, at least Bachelor's or equivalent, population 25+, total (%) (cumulative)`,
+    GDP = `GDP per capita, PPP (constant 2021 international $)`,
+    Life_Expectancy = `Life expectancy at birth, total (years)`,
+    Pollution = `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`
+  )
+
+# Extrait du df final
+head(df_wide)
+
 # Afficher la dimension du dataset final
 print(dim(df_wide))
 
@@ -93,11 +109,12 @@ print(dim(df_wide))
 write.csv(df_wide, "./DATA/data_transformed_clean.csv", row.names = FALSE)
 ```
 
-```{r}
-colnames(data)
-```
-
 # Statistiques descriptives
+
+```{r}
+library(GGally)
+library(ggcorrplot)
+```
 
 ```{r}
 data <- read_delim("DATA/data_transformed_clean.csv")
@@ -108,57 +125,58 @@ glimpse(data)
 ```
 
 ```{r}
-summary(data)
+descriptive_stats <- summary(data)
+descriptive_stats
+```
+
+```{r}
+ggplot(data, aes(x = Life_Expectancy)) +
+  geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  ggtitle("Distribution de l'espérance de vie")
+
+# Boucle pour générer les histogrammes de toutes les variables
+num_vars <- names(data)[3:7]  # Sélection des colonnes numériques
+for (var in num_vars) {
+  print(
+    ggplot(data, aes_string(x = var)) +
+      geom_histogram(fill = "skyblue", color = "black", bins = 30) +
+      theme_minimal() +
+      ggtitle(paste("Distribution de", var))
+  )
+}
+```
+
+```{r}
+for (var in num_vars) {
+  print(
+    ggplot(data, aes_string(y = var)) +
+      geom_boxplot(fill = "lightblue", color = "black") +
+      theme_minimal() +
+      ggtitle(paste("Boxplot de", var))
+  )
+}
+```
+
+```{r}
+for (var in num_vars) {
+  print(
+    ggplot(data, aes_string(x = var, y = "Life_Expectancy")) +
+      geom_point(color = "blue", alpha = 0.6) +
+      geom_smooth(method = "lm", color = "red") +
+      theme_minimal() +
+      ggtitle(paste("Espérance de vie vs", var))
+  )
+}
+
+
+
 ```
 
 ```{r}
 
-# Statistiques descriptives pour l'espérance de vie
-summary(data$`Life expectancy at birth, total (years)`)
-sd(data$`Life expectancy at birth, total (years)`, na.rm = TRUE)
-
-# Histogramme
-ggplot(data, aes(x = `Life expectancy at birth, total (years)`)) +
-  geom_histogram(bins = 20, fill = "blue", alpha = 0.6) +
-  labs(title = "Distribution de l'espérance de vie", x = "Espérance de vie", y = "Fréquence") +
-  theme_minimal()
-
-# Boxplot
-ggplot(data, aes(y = `Life expectancy at birth, total (years)`)) +
-  geom_boxplot(fill = "red", alpha = 0.6) +
-  labs(title = "Boxplot de l'espérance de vie", y = "Espérance de vie") +
-  theme_minimal()
-
-```
-
-```{r}
-# Espérance de vie vs PIB par habitant
-ggplot(data, aes(x = `GDP per capita, PPP (constant 2021 international $)`, 
-                     y = `Life expectancy at birth, total (years)`)) +
-  geom_point(alpha = 0.7, color = "blue") +
-  geom_smooth(method = "lm", color = "red", se = FALSE) +
-  labs(title = "Espérance de vie vs PIB par habitant", 
-       x = "PIB par habitant (PPP, $)", y = "Espérance de vie") +
-  theme_minimal()
-
-# Espérance de vie vs Dépenses de santé
-ggplot(data, aes(x = `Current health expenditure per capita, PPP (current international $)`, 
-                     y = `Life expectancy at birth, total (years)`)) +
-  geom_point(alpha = 0.7, color = "green") +
-  geom_smooth(method = "lm", color = "red", se = FALSE) +
-  labs(title = "Espérance de vie vs Dépenses de santé", 
-       x = "Dépenses de santé ($ PPP)", y = "Espérance de vie") +
-  theme_minimal()
-
-# Espérance de vie vs Pollution PM2.5
-ggplot(data, aes(x = `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`, 
-                     y = `Life expectancy at birth, total (years)`)) +
-  geom_point(alpha = 0.7, color = "purple") +
-  geom_smooth(method = "lm", color = "red", se = FALSE) +
-  labs(title = "Espérance de vie vs Pollution de l'air (PM2.5)", 
-       x = "Exposition annuelle PM2.5", y = "Espérance de vie") +
-  theme_minimal()
-
+cor_matrix <- cor(data[, 3:7], use = "complete.obs")
+ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
 
 ```
 

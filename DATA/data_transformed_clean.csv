@@ -1,4 +1,4 @@
-"Country Name","Country Code","Control of Corruption: Estimate","Current health expenditure per capita, PPP (current international $)","Educational attainment, at least Bachelor's or equivalent, population 25+, total (%) (cumulative)","GDP per capita, PPP (constant 2021 international $)","Life expectancy at birth, total (years)","PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)"
+"Country_Name","Country_code","Corruption","Health_Expenditure","Education","GDP","Life_Expectancy","Pollution"
 "Afghanistan","AFG",-1.15493178367615,321.499080608947,3.98425006866455,1992.42439419795,62.879,58.3308722306744
 "Albania","ALB",-0.332218527793884,981.879024394578,19.834644317627,17975.7983946412,76.833,15.70470712234
 "Algeria","DZA",-0.589308321475983,710.995867236057,11.4359302520752,15159.324237194,77.129,24.3886086444981
