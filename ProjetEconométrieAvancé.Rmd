@@ -159,7 +159,7 @@ descriptive_stats
 
 ```{r}
 # Boucle pour générer les histogrammes de toutes les variables
-num_vars <- names(data)[3:11]  # Sélection des colonnes numériques
+num_vars <- names(data)[3:9]  # Sélection des colonnes numériques
 for (var in num_vars) {
   print(
     ggplot(data, aes_string(x = var)) +
@@ -213,12 +213,8 @@ Transformons nos variables et regardons si cela linéarise la relation :
 data <- data %>% 
   mutate(GDP_log = log(GDP)) %>% 
   mutate(Health_Expenditure_log = log(Health_Expenditure))
-colnames(data)
 ```
 
-```{r}
-data$GDP_log
-```
 ```{r}
 ggplot(data, aes(x = GDP_log, y = Life_Expectancy)) +
   geom_point(color = "blue", alpha = 0.6) +
