@@ -66,10 +66,19 @@ $$
 
 ```{r}
 df <- read_delim("DATA/Data.csv")
+df_age <- readxl::read_excel("DATA/age.xlsx")
 df
+df_age
 ```
 
 ```{r}
+
+df_age_filtered <- df_age %>%
+  select(`pays Code`, `2023 [YR2023]`) %>% 
+  rename(Population_65 = `2023 [YR2023]`) %>% 
+  rename(Country_code = `pays Code`)
+
+
 # Filtrer pour ne garder qu'une seule année (par exemple, la plus récente disponible)
 df_clean <- df %>%
   pivot_longer(cols = starts_with("20"), 
@@ -80,11 +89,14 @@ df_clean <- df %>%
   slice_max(Year) %>%  # Prend la dernière année disponible
   ungroup()
 
+
+
 # Transformer les séries en colonnes
 df_wide <- df_clean %>%
   select(-Year, -`Series Code`) %>%
   pivot_wider(names_from = `Series Name`, values_from = Value) %>%
   drop_na()  # Supprime les lignes contenant des NA
+
 
 # Pour plus de simplicité, renommage des colonnes
 df_wide <- df_wide %>% 
@@ -99,12 +111,22 @@ df_wide <- df_wide %>%
     Pollution = `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`
   )
 
-# Extrait du df final
+df_wide <- df_wide %>%
+  left_join(df_age_filtered, by = "Country_code")
+```
+
+## Check final dataset
+
+```{r}
+dim(df_wide)
+sum(is.na(df_wide))
 head(df_wide)
 
-# Afficher la dimension du dataset final
-print(dim(df_wide))
+```
 
+## Enregistrement du dataset final
+
+```{r}
 # Sauvegarder le fichier transformé
 write.csv(df_wide, "./DATA/data_transformed_clean.csv", row.names = FALSE)
 ```
@@ -120,6 +142,8 @@ library(ggcorrplot)
 data <- read_delim("DATA/data_transformed_clean.csv")
 ```
 
+## Sommaire
+
 ```{r}
 glimpse(data)
 ```
@@ -129,14 +153,13 @@ descriptive_stats <- summary(data)
 descriptive_stats
 ```
 
-```{r}
-ggplot(data, aes(x = Life_Expectancy)) +
-  geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
-  theme_minimal() +
-  ggtitle("Distribution de l'espérance de vie")
+## Analyse univariée
 
+### Histogrammes
+
+```{r}
 # Boucle pour générer les histogrammes de toutes les variables
-num_vars <- names(data)[3:7]  # Sélection des colonnes numériques
+num_vars <- names(data)[3:11]  # Sélection des colonnes numériques
 for (var in num_vars) {
   print(
     ggplot(data, aes_string(x = var)) +
@@ -146,6 +169,8 @@ for (var in num_vars) {
   )
 }
 ```
+
+### Boxplot
 
 ```{r}
 for (var in num_vars) {
@@ -158,6 +183,10 @@ for (var in num_vars) {
 }
 ```
 
+## Analyse bivariée
+
+### Nuages de points
+
 ```{r}
 for (var in num_vars) {
   print(
@@ -168,22 +197,130 @@ for (var in num_vars) {
       ggtitle(paste("Espérance de vie vs", var))
   )
 }
+```
+
+### Transformations intéressantes
 
 
+On remarque que :
 
+- La relation entre l'espérance de vie et les dépenses de santé semble être logarithmique 
+- La relation entre l'espérance de vie et le PIB semble être logarithmique
+
+Transformons nos variables et regardons si cela linéarise la relation : 
+
+```{r}
+data <- data %>% 
+  mutate(GDP_log = log(GDP)) %>% 
+  mutate(Health_Expenditure_log = log(Health_Expenditure))
+colnames(data)
 ```
 
 ```{r}
+data$GDP_log
+```
+```{r}
+ggplot(data, aes(x = GDP_log, y = Life_Expectancy)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Relation entre le Log du PIB et l'Espérance de Vie",
+    x = "Log du PIB (GDP_log)",
+    y = "Espérance de Vie (Life Expectancy)"
+  ) +
+  theme_minimal()
 
-cor_matrix <- cor(data[, 3:7], use = "complete.obs")
+ggplot(data, aes(x = Health_Expenditure_log, y = Life_Expectancy)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Relation entre le Log du PIB et l'Espérance de Vie",
+    x = "Log du PIB (GDP_log)",
+    y = "Espérance de Vie (Life Expectancy)"
+  ) +
+  theme_minimal()
+
+```
+
+Les relations sont bien linéarisés, c'est une bonne chose et nous permettra d'effectuer une meilleur modélisation. 
+
+On garde les variables "log" uniquement : 
+
+```{r}
+data <- data %>% 
+  select(-GDP) %>% 
+  select(-Health_Expenditure)
+
+data
+```
+
+
+### Matrice de corrélation
+
+```{r}
+
+cor_matrix <- cor(data[, 3:9], use = "complete.obs")
 ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
 
 ```
 
 # Traitement de l'endogénéité
 
+## Analyse du problème d'endogénéité 
+
+## Analyse de nos instruments
+
+## Méthode 2SLS
+
+## Analyse des résultats
+
 # Traitement de la multicolinéarité
 
-# Surement quelque chose ici
+La multi-colinéarité complique l'interprétation des coefficients de régression, rendant difficile d'isoler l'impact de chaque variable. Cela peut aussi rendre les modèles moins stables et augmenter la variance des coefficients, ce qui fausse les conclusions tirées des analyses statistiques.
+
+## Identification du problème de multicolinéarité 
+
+D'abord on regarde avec la matrice de correlation : 
+
+```{r}
+ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
+```
+
+On remarque certaines valeurs sont très proches de 0.8 et certaines au dessus, ce qui nous indique un problème de multicolinéarité. 
+Réalisons une regression via MCO : 
+
+```{r}
+data_no_country <- data %>%
+  select(-Country_Name, -Country_code)
+
+
+MCO <- lm(Life_Expectancy ~ ., data = data_no_country)
+summary(MCO)
+```
+
+### VIF
+
+```{r}
+library(car)
+vif(MCO)
+```
+
+
+## Regression en composantes principales
+
+```{r}
+sum(is.na(data))
+```
+
+
+```{r}
+library(pls)
+pcr_est <- pcr(Life_Expectancy ~ ., data = data, jackknife = TRUE, validation = "CV")
+```
+
+
+## Méthode de pénalisation
+
+# Double Machine Learning
 
 # Conclusion
