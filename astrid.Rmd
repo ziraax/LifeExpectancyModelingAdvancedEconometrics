@@ -1,0 +1,464 @@
+# Introduction
+
+L’espérance de vie constitue un indicateur clé du développement d’un pays, reflétant l’état de santé de la population et la qualité des infrastructures socio-économiques. De nombreux travaux en économie de la santé mettent en évidence l’influence de facteurs tels que le revenu par habitant, la dépense de santé, le niveau d’éducation ou encore la qualité de l’environnement sur la durée de vie moyenne. Cependant, ces relations sont souvent sujettes à des biais économétriques, notamment liés à l’endogénéité de certaines variables explicatives.
+
+Dans ce projet, nous nous attachons à modéliser l’espérance de vie en utilisant un modèle structurel intégrant ces déterminants. Nous identifierons et corrigerons le biais d’endogénéité à l’aide de la méthode des doubles moindres carrés (2SLS), en recourant à des variables instrumentales appropriées. Nous nous assurerons également que notre modèle est bien identifié et vérifierons la pertinence des instruments à travers des tests statistiques.
+
+Par la suite, nous nous intéresserons au problème de la multicolinéarité, une autre source potentielle de distorsion dans l’interprétation des coefficients estimés. Pour y remédier, nous utiliserons des techniques de régularisation et d’analyse des corrélations entre variables explicatives. Enfin, nous explorerons l’utilisation du Double Machine Learning (DML), une approche récente permettant d’estimer des effets causaux tout en tenant compte d’un grand nombre de variables explicatives et en corrigeant les biais liés à l’endogénéité et aux interactions complexes entre variables.
+
+Ce projet vise ainsi à allier des approches économétriques classiques et des méthodes d’apprentissage statistique avancées pour améliorer la robustesse des estimations et mieux comprendre les déterminants de l’espérance de vie.
+
+# Forme structurelle du modèle proposé
+
+L'espérance de vie ($LE$) dépend de plusieurs facteurs économiques, éducatifs et environnementaux.
+
+Nous proposons le modèle suivant, inspiré de la littérature :
+
+$$
+    LE_i = \beta_0 + \beta_1 GDP_i + \beta_2 HE_i + \beta_3 EDU_i + \beta_4 ENV_i + u_i
+$$
+
+où :
+
+-   $LE_i$ est l'espérance de vie
+
+-   $GDP_i$ est le PIB par habitant
+
+-   $HE_i$ est la dépense de santé par habitant
+
+-   $EDU_i$ est le niveau moyen d'éducation
+
+-   $ENV_i$ est un indicateur de qualité environnementale
+
+-   $u_i$ est le terme d'erreur capturant les facteurs non observés.
+
+Cependant, la dépense de santé ($HE$) peut être endogène (ce que nous verifierons). Nous introduisons donc une seconde équation expliquant $HE_i$ à l’aide d’instruments :
+
+$$
+\begin{equation}    HE_i = \gamma_0 + \gamma_1 POL_i   + \gamma_2 POP65_i + v_i\end{equation}
+$$
+
+-   $POL_i$ représente la qualité institutionelle ou politique
+
+-   $v_i$ est le terme d'erreur spécifique à cette équation.
+
+L'endogénéité de $HE_i$ implique que $E[u_i | HE_i] \neq 0$, justifiant l'utilisation de la méthode des doubles moindres carrés (2SLS) pour estimer correctement les coefficients.
+
+# Import des librairies
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(AER)
+
+```
+
+# Déscription des données
+
+Dans le cadre de ce modèle, nous avons sélectionné un ensemble de variables clés influençant l'espérance de vie, tirées de la Banque mondiale. Ces variables couvrent plusieurs dimensions essentielles de l'économie et de la société. Le **PIB par habitant** (en parité de pouvoir d'achat) est choisi comme mesure de la richesse d'un pays, influençant directement l'accès aux soins et aux services essentiels. Les **dépenses de santé par habitant**, également en parité de pouvoir d'achat, mesurent l'engagement d'un pays dans son système de santé et son impact sur la longévité. Le **niveau d'éducation**, représenté par la proportion de la population ayant un diplôme équivalent au baccalauréat, est une variable importante, car l'éducation est étroitement liée à une meilleure santé et à une espérance de vie plus longue. En parallèle, nous incluons des indicateurs environnementaux tels que la **pollution de l'air**, mesurée par l'exposition moyenne aux PM2.5, qui a un impact direct sur la santé publique. Enfin, le **contrôle de la corruption** reflète la qualité des institutions et la gouvernance, des facteurs essentiels pour le bon fonctionnement des systèmes de santé et des infrastructures publiques. Ces variables ont été choisies en raison de leur pertinence théorique et de la disponibilité des données à l’échelle internationale.
+
+$$
+\begin{array}{|l|l|l|l|}\hline\textbf{Variable} & \textbf{Description} & \textbf{Code} & \textbf{Source} \\\hline\text{Country Name} & \text{Nom du pays} & \text{Country Name} & \text{Banque mondiale} \\\text{Country Code} & \text{Code pays (ISO 3166-1 alpha-3)} & \text{Country Code} & \text{Banque mondiale} \\\text{Control of Corruption: Estimate} & \text{Estimation du contrôle de la corruption, mesure de la gouvernance} & \text{Control of Corruption: Estimate} & \text{Banque mondiale} \\\text{Current health expenditure per capita, PPP (current international \$)} & \text{Dépenses de santé par habitant, en parité de pouvoir d'achat (PPA)} & \text{Current health expenditure per capita, PPP (current international \$)} & \text{Banque mondiale} \\\text{Educational attainment, at least Bachelor's or equivalent, population 25+, total (\%)} & \text{Pourcentage de la population âgée de 25 ans et plus ayant un niveau d'éducation équivalent au baccalauréat ou plus} & \text{Educational attainment, at least Bachelor's or equivalent, population 25+, total (\%)} & \text{Banque mondiale} \\\text{GDP per capita, PPP (constant 2021 international \$)} & \text{PIB par habitant, en parité de pouvoir d'achat, en dollars constants 2021} & \text{GDP per capita, PPP (constant 2021 international \$)} & \text{Banque mondiale} \\\text{Life expectancy at birth, total (years)} & \text{Espérance de vie à la naissance, en années} & \text{Life expectancy at birth, total (years)} & \text{Banque mondiale} \\\text{PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)} & \text{Pollution de l'air (PM2.5), exposition annuelle moyenne en microgrammes par mètre cube} & \text{PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)} & \text{Banque mondiale} \\\hline\end{array}
+$$
+
+# Prétraitement des données
+
+```{r}
+df <- read_delim("DATA/Data.csv")
+df_age <- readxl::read_excel("DATA/age.xlsx")
+df
+df_age
+```
+
+```{r}
+
+df_age_filtered <- df_age %>%
+  select(`pays Code`, `2023 [YR2023]`) %>% 
+  rename(Population_65 = `2023 [YR2023]`) %>% 
+  rename(Country_code = `pays Code`)
+
+
+# Filtrer pour ne garder qu'une seule année (par exemple, la plus récente disponible)
+df_clean <- df %>%
+  pivot_longer(cols = starts_with("20"), 
+               names_to = "Year", 
+               values_to = "Value") %>%
+  filter(!is.na(Value)) %>%
+  group_by(`Country Name`, `Country Code`, `Series Name`, `Series Code`) %>%
+  slice_max(Year) %>%  # Prend la dernière année disponible
+  ungroup()
+
+
+
+# Transformer les séries en colonnes
+df_wide <- df_clean %>%
+  select(-Year, -`Series Code`) %>%
+  pivot_wider(names_from = `Series Name`, values_from = Value) %>%
+  drop_na()  # Supprime les lignes contenant des NA
+
+
+# Pour plus de simplicité, renommage des colonnes
+df_wide <- df_wide %>% 
+  rename(
+    Country_Name = `Country Name`,
+    Country_code = `Country Code`,
+    Corruption = `Control of Corruption: Estimate`,
+    Health_Expenditure = `Current health expenditure per capita, PPP (current international $)`,
+    Education = `Educational attainment, at least Bachelor's or equivalent, population 25+, total (%) (cumulative)`,
+    GDP = `GDP per capita, PPP (constant 2021 international $)`,
+    Life_Expectancy = `Life expectancy at birth, total (years)`,
+    Pollution = `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`
+  )
+
+df_wide <- df_wide %>%
+  left_join(df_age_filtered, by = "Country_code")
+```
+
+## Check final dataset
+
+```{r}
+dim(df_wide)
+sum(is.na(df_wide))
+head(df_wide)
+
+```
+
+## Enregistrement du dataset final
+
+```{r}
+# Sauvegarder le fichier transformé
+write.csv(df_wide, "./DATA/data_transformed_clean.csv", row.names = FALSE)
+```
+
+# Statistiques descriptives
+
+```{r}
+library(GGally)
+library(ggcorrplot)
+```
+
+```{r}
+data <- read_delim("DATA/data_transformed_clean.csv")
+```
+
+## Sommaire
+
+```{r}
+glimpse(data)
+```
+
+```{r}
+descriptive_stats <- summary(data)
+descriptive_stats
+```
+
+## Analyse univariée
+
+### Histogrammes
+
+```{r}
+# Boucle pour générer les histogrammes de toutes les variables
+num_vars <- names(data)[3:9]  # Sélection des colonnes numériques
+for (var in num_vars) {
+  print(
+    ggplot(data, aes_string(x = var)) +
+      geom_histogram(fill = "skyblue", color = "black", bins = 30) +
+      theme_minimal() +
+      ggtitle(paste("Distribution de", var))
+  )
+}
+```
+
+### Boxplot
+
+```{r}
+for (var in num_vars) {
+  print(
+    ggplot(data, aes_string(y = var)) +
+      geom_boxplot(fill = "lightblue", color = "black") +
+      theme_minimal() +
+      ggtitle(paste("Boxplot de", var))
+  )
+}
+```
+
+## Analyse bivariée
+
+### Nuages de points
+
+```{r}
+for (var in num_vars) {
+  print(
+    ggplot(data, aes_string(x = var, y = "Life_Expectancy")) +
+      geom_point(color = "blue", alpha = 0.6) +
+      geom_smooth(method = "lm", color = "red") +
+      theme_minimal() +
+      ggtitle(paste("Espérance de vie vs", var))
+  )
+}
+```
+
+### Transformations intéressantes
+
+On remarque que :
+
+-   La relation entre l'espérance de vie et les dépenses de santé semble être logarithmique
+-   La relation entre l'espérance de vie et le PIB semble être logarithmique
+
+Transformons nos variables et regardons si cela linéarise la relation :
+
+```{r}
+data <- data %>% 
+  mutate(GDP_log = log(GDP)) %>% 
+  mutate(Health_Expenditure_log = log(Health_Expenditure))
+```
+
+```{r}
+ggplot(data, aes(x = GDP_log, y = Life_Expectancy)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Relation entre le Log du PIB et l'Espérance de Vie",
+    x = "Log du PIB (GDP_log)",
+    y = "Espérance de Vie (Life Expectancy)"
+  ) +
+  theme_minimal()
+
+ggplot(data, aes(x = Health_Expenditure_log, y = Life_Expectancy)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(
+    title = "Relation entre le Log du PIB et l'Espérance de Vie",
+    x = "Log du PIB (GDP_log)",
+    y = "Espérance de Vie (Life Expectancy)"
+  ) +
+  theme_minimal()
+
+```
+
+Les relations sont bien linéarisés, c'est une bonne chose et nous permettra d'effectuer une meilleur modélisation.
+
+On garde les variables "log" uniquement :
+
+```{r}
+data <- data %>% 
+  select(-GDP) %>% 
+  select(-Health_Expenditure)
+
+data
+```
+
+### Matrice de corrélation
+
+```{r}
+
+cor_matrix <- cor(data[, 3:9], use = "complete.obs")
+ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
+
+```
+
+# Traitement de l'endogénéité
+
+## Analyse du problème d'endogénéité
+
+Objectif : Savoir si certaines variables explicatives sont correlées au terme d'erreur
+
+```{r}
+frm <- lm(Health_Expenditure_log~Corruption+Population_65+GDP_log+Education+Pollution, data=data)
+residu_frm <- resid(frm)
+
+```
+
+### Test de Wu-Hausman
+
+**Formes structurelle et réduite**
+
+Nous supposons que l’espérance de vie ($LE$) dépend du PIB, de la dépense de santé, de l’éducation et de la pollution. Le modèle est :
+
+$$
+LE_i = \beta_0 + \beta_1 GDP_i + \beta_2 HE_i + \beta_3 EDU_i + \beta_4 ENV
+_i + u_i
+$$
+
+Cependant, la dépense de santé ($HE$) peut être endogène. On propose la forme réduite suivante :
+
+$$
+HE_i = \gamma_0 + \gamma_1 POL_i + \gamma_2 POP65_i + \gamma_3 GDP_i + \gamma_4 EDU_i + \gamma_5 ENV_i + v_i
+$$
+
+Cette forme permet de prédire $HE$ à l’aide d’instruments supposés exogènes.
+
+Le test de Wu-Hausman est utilisé pour déterminer si la variable explicative Health_expenditure est endogène dans notre modèle de régression.
+
+Ce test va comparer les estimateurs des MCO et de VI pour savoir si on peut utiliser les MCO ou est ce qu'on doit corriger l'engogénéité avec les double moindres carrés.
+
+$$ H0 : Pas \ d'endogénéité$$
+
+$$   H1: Présence\ d'endogénéité $$
+
+```{r}
+
+Wu_Hausman<- lm(Life_Expectancy~GDP_log+Health_Expenditure_log+Education+Pollution+ residu_frm,data=data)
+
+summary(Wu_Hausman)
+```
+
+```{r}
+iv_model <- ivreg(Life_Expectancy~GDP_log+Health_Expenditure_log+Education+Pollution | Corruption+Population_65+GDP_log+Education+Pollution, data = data)
+
+# Résumé avec diagnostics (dont Wu-Hausman)
+summary(iv_model, diagnostics = TRUE)
+
+```
+
+La p_value associée au coefficient des résidus de la forme réduite du modèle est inférieur à 5%, on rejette l'hypothèse nulle. On a bien un **problème dd'endogénéité**. Cela signifie que la variable Health_expenditure est correlée au terme d'erreur dans la forme structurelle du modèle.
+
+L’estimateur des moindres carrés ordinaires (MCO) est **biaisé et non convergent** en présence d’endogénéité. Il ne permet donc pas une estimation fiable des coefficients. Il est nécessaire d’utiliser une méthode d’estimation adaptée comme les **deux moindres carrés (2SLS)**.
+
+## Analyse de nos instruments
+
+### Test de Weak instrument
+
+Le test vise à vérifier si les instruments choisis Corruption et Population_65 sont **suffisamment corrélés** à la variable endogène Health_Expenditure_log.
+
+En d'autres termes, il teste la **pertinence des instruments** dans la première étape du modèle 2SLS.
+
+Dans cette première étape du 2SLS, on estime la forme réduite :
+
+$$
+HE_i = \gamma_0 + \gamma_1 POL_i + \gamma_2 POP65_i + \gamma_3 GDP_i + \gamma_4 EDU_i + \gamma_5 ENV_i + v_i
+$$
+
+Nous évaluons ensuite dans quelle mesure les instruments expliquent la variable endogène.\
+Si leur corrélation est trop faible, le modèle 2SLS devient **peu fiable**, même s'il est théoriquement bien spécifié.
+
+Pour évaluer la force de nos instruments, nous nous appuyons sur la statistique F de la première régression, conformément au test de Staiger & Stock (1997). Selon cette référence, une statistique **F \<10** indique des instruments faibles, pouvant conduire à des estimations biaisées, instables ou non convergentes dans le cadre du 2SLS.
+
+**Résultats du test :**
+
+$$ H0 : Les\ instruments\ sont \ faibles $$
+
+$$ H1 : Les \ instruments \ sont \ forts $$
+
+Le test des donne une statistique F de **11.507** avec une p-value \< 0.001. On rejette l'hypothèse nulle au seuil de 1 %. Nos instruments sont **suffisamment** **corrélés** avec la variable endogène (dépense de santé).
+
+Nous pouvons donc considérer qu’ils sont **pertinents** et poursuivre avec l’**estimation par la méthode 2SLS**.
+
+## Méthode 2SLS
+
+Étant donné la présence d’endogénéité dans la variable Health_Expenditure_log, identifiée grâce au test de Wu-Hausman, nous utilisons la méthode des deux moindres carrés (2SLS) pour obtenir des estimations non biaisées.
+
+La méthode se déroule en deux étapes :
+
+**Étape 1 – Forme réduite :**
+
+On prédit la variable endogène à l’aide des instruments et des variables exogènes :
+
+$$
+HE_i = \gamma_0 + \gamma_1 POL_i + \gamma_2 POP65_i + \gamma_3 GDP_i + \gamma_4 EDU_i + \gamma_5 ENV_i + v_i
+$$
+
+On en extrait les **valeurs ajustées** ($\widehat{HE}_i$)
+
+**Étape 2 – Substitution dans le modèle structurel :**
+
+On remplace la variable endogène par sa valeur prédite et on estime le modèle suivant :
+
+$$
+LE_i = \beta_0 + \beta_1 GDP_i +\beta_2 \widehat{HE}_i  + \beta_3 EDU_i + \beta_4 ENV_i + u_i
+$$
+
+Cette approche permet de **corriger le biais** d’endogénéité en utilisant uniquement la variation exogène de HE car on a remplacé HE par sa version purifiée qui est exogène.
+
+```{r}
+
+Estimation_2sls <- ivreg(Life_Expectancy~GDP_log+Health_Expenditure_log+Education+Pollution | Corruption+Population_65+GDP_log+Education+Pollution, data = data)
+
+summary(Estimation_2sls, diagnostics = TRUE)
+
+```
+
+## Analyse des résultats
+
+Nous présentons ici les résultats du modèle estimé par la méthode des doubles moindres carrés (2SLS), à l’aide des instruments Corruption et Population_65.
+
+Le coefficient associé à la dépense de santé Health_Expenditure_log est positif et **significatif au seuil de 5 %** ($\hat{\beta}_2 = 5.29$, p = 0.0106). Cela indique qu'une augmentation des dépenses de santé est associée à une augmentation de l'espérance de vie, **une fois l’endogénéité corrigée**.
+
+Cependant, les coefficients des autres variables (GDP_log, Education, Pollution) ne sont pas significatifs, ce qui pourrait s’expliquer par des colinéarités, une faible variation entre pays, ou une relation plus indirecte avec la variable dépendante.
+
+### Test de Sargan
+
+Le test de Sargan (ou test de sur-identification) permet de vérifier la **validité globale des instruments** dans un modèle IV (2SLS), à condition que le modèle soit sur-identifié.
+
+Notre modèle est **sur-identifié**, car nous utilisons deux instruments (Corruption et Population_65) pour une seule variable endogène (Health_Expenditure_log).
+
+Ce test est donc une **étape essentielle** pour s’assurer que l’identification du modèle IV repose sur des instruments économétriquement solides.
+
+.$$H₀ : Les\ instruments\ sont \ valides, c’est-à-dire\ non\ corrélés\ au\ terme \ d’erreur \ de\ l’équation\ structurelle.$$
+
+$H₁ : Au\ moins\ un\ instrument\ est\ corrélé\ au\ terme\ d’erreur\ → donc\ non\ valide.$
+
+Le test retourne une statistique de **0.352** avec une **p-value = 0.5528** \> 5%. On accepte H0,
+
+**les instruments sont valides.**
+
+## Conclusion partielle
+
+L’ensemble des tests effectués confirme la pertinence de la méthode des doubles moindres carrés (2SLS) pour estimer notre modèle.
+
+\- Le test de Wu-Hausman indique que la variable Health_Expenditure_log est endogène.
+
+\- Le test week instrument montre que Corruption et Population_65 sont suffisamment corrélés à la variable endogène.
+
+\- Le test de Sargan confirme que nos instruments sont valides , c’est-à-dire non corrélés avec le terme d’erreur.
+
+Nous disposons donc d’un modèle économétrique solide, qui permet d’interpréter de manière causale l’effet des dépenses de santé sur l’espérance de vie.
+
+# Traitement de la multicolinéarité
+
+La multi-colinéarité complique l'interprétation des coefficients de régression, rendant difficile d'isoler l'impact de chaque variable. Cela peut aussi rendre les modèles moins stables et augmenter la variance des coefficients, ce qui fausse les conclusions tirées des analyses statistiques.
+
+## Identification du problème de multicolinéarité
+
+D'abord on regarde avec la matrice de correlation :
+
+```{r}
+ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
+```
+
+On remarque certaines valeurs sont très proches de 0.8 et certaines au dessus, ce qui nous indique un problème de multicolinéarité. Réalisons une regression via MCO :
+
+```{r}
+data_no_country <- data %>%
+  select(-Country_Name, -Country_code)
+
+
+MCO <- lm(Life_Expectancy ~ ., data = data_no_country)
+summary(MCO)
+```
+
+### VIF
+
+```{r}
+library(car)
+vif(MCO)
+```
+
+## Regression en composantes principales
+
+```{r}
+sum(is.na(data))
+```
+
+```{r}
+library(pls)
+pcr_est <- pcr(Life_Expectancy ~ ., data = data, jackknife = TRUE, validation = "CV")
+```
+
+## Méthode de pénalisation
+
+# Double Machine Learning
+
+# Conclusion

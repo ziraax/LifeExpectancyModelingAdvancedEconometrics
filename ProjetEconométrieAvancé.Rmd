@@ -8,7 +8,7 @@ Par la suite, nous nous intéresserons au problème de la multicolinéarité, un
 
 Ce projet vise ainsi à allier des approches économétriques classiques et des méthodes d’apprentissage statistique avancées pour améliorer la robustesse des estimations et mieux comprendre les déterminants de l’espérance de vie.
 
-# Forme structurelle du modèle proposé
+# Modèle ad-hoc proposé
 
 L'espérance de vie ($LE$) dépend de plusieurs facteurs économiques, éducatifs et environnementaux.
 
@@ -35,7 +35,7 @@ où :
 Cependant, la dépense de santé ($HE$) peut être endogène (ce que nous verifierons). Nous introduisons donc une seconde équation expliquant $HE_i$ à l’aide d’instruments :
 
 $$
-\begin{equation}    HE_i = \gamma_0 + \gamma_1 GDP_i + \gamma_2 EDU_i + \gamma_3 POL_i + v_i\end{equation}
+\begin{equation}    HE_i = \gamma_0 + \gamma_1 POL_i   + \gamma_2 POP65_i + v_i\end{equation}
 $$
 
 -   $POL_i$ représente la qualité institutionelle ou politique
@@ -201,13 +201,12 @@ for (var in num_vars) {
 
 ### Transformations intéressantes
 
-
 On remarque que :
 
-- La relation entre l'espérance de vie et les dépenses de santé semble être logarithmique 
-- La relation entre l'espérance de vie et le PIB semble être logarithmique
+-   La relation entre l'espérance de vie et les dépenses de santé semble être logarithmique
+-   La relation entre l'espérance de vie et le PIB semble être logarithmique
 
-Transformons nos variables et regardons si cela linéarise la relation : 
+Transformons nos variables et regardons si cela linéarise la relation :
 
 ```{r}
 data <- data %>% 
@@ -238,9 +237,9 @@ ggplot(data, aes(x = Health_Expenditure_log, y = Life_Expectancy)) +
 
 ```
 
-Les relations sont bien linéarisés, c'est une bonne chose et nous permettra d'effectuer une meilleur modélisation. 
+Les relations sont bien linéarisés, c'est une bonne chose et nous permettra d'effectuer une meilleur modélisation.
 
-On garde les variables "log" uniquement : 
+On garde les variables "log" uniquement :
 
 ```{r}
 data <- data %>% 
@@ -249,7 +248,6 @@ data <- data %>%
 
 data
 ```
-
 
 ### Matrice de corrélation
 
@@ -262,28 +260,174 @@ ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
 
 # Traitement de l'endogénéité
 
-## Analyse du problème d'endogénéité 
+```{r}
+library(ivreg)
+```
+
+Objectif : Savoir si certaines variables explicatives sont correlées au terme d'erreur
+
+```{r}
+frm <- lm(Health_Expenditure_log~Corruption+Population_65+GDP_log+Education+Pollution, data=data)
+residu_frm <- resid(frm)
+
+```
+
+### Test de Wu-Hausman
+
+**Formes structurelle et réduite**
+
+Nous supposons que l’espérance de vie ($LE$) dépend du PIB, de la dépense de santé, de l’éducation et de la pollution. Le modèle est :
+
+$$
+LE_i = \beta_0 + \beta_1 GDP_i + \beta_2 HE_i + \beta_3 EDU_i + \beta_4 ENV
+_i + u_i
+$$
+
+Cependant, la dépense de santé ($HE$) peut être endogène. On propose la forme réduite suivante :
+
+$$
+HE_i = \gamma_0 + \gamma_1 POL_i + \gamma_2 POP65_i + \gamma_3 GDP_i + \gamma_4 EDU_i + \gamma_5 ENV_i + v_i
+$$
+
+Cette forme permet de prédire $HE$ à l’aide d’instruments supposés exogènes.
+
+Le test de Wu-Hausman est utilisé pour déterminer si la variable explicative Health_expenditure est endogène dans notre modèle de régression.
+
+Ce test va comparer les estimateurs des MCO et de VI pour savoir si on peut utiliser les MCO ou est ce qu'on doit corriger l'engogénéité avec les double moindres carrés.
+
+$$ H0 : Pas \ d'endogénéité$$
+
+$$   H1: Présence\ d'endogénéité $$
+
+```{r}
+
+Wu_Hausman<- lm(Life_Expectancy~GDP_log+Health_Expenditure_log+Education+Pollution+ residu_frm,data=data)
+
+summary(Wu_Hausman)
+```
+
+```{r}
+iv_model <- ivreg(Life_Expectancy~GDP_log+Health_Expenditure_log+Education+Pollution | Corruption+Population_65+GDP_log+Education+Pollution, data = data)
+
+# Résumé avec diagnostics (dont Wu-Hausman)
+summary(iv_model, diagnostics = TRUE)
+
+```
+
+La p_value associée au coefficient des résidus de la forme réduite du modèle est inférieur à 5%, on rejette l'hypothèse nulle. On a bien un **problème dd'endogénéité**. Cela signifie que la variable Health_expenditure est correlée au terme d'erreur dans la forme structurelle du modèle.
+
+L’estimateur des moindres carrés ordinaires (MCO) est **biaisé et non convergent** en présence d’endogénéité. Il ne permet donc pas une estimation fiable des coefficients. Il est nécessaire d’utiliser une méthode d’estimation adaptée comme les **deux moindres carrés (2SLS)**.
 
 ## Analyse de nos instruments
 
+### Test de Weak instrument
+
+Le test vise à vérifier si les instruments choisis Corruption et Population_65 sont **suffisamment corrélés** à la variable endogène Health_Expenditure_log.
+
+En d'autres termes, il teste la **pertinence des instruments** dans la première étape du modèle 2SLS.
+
+Dans cette première étape du 2SLS, on estime la forme réduite :
+
+$$
+HE_i = \gamma_0 + \gamma_1 POL_i + \gamma_2 POP65_i + \gamma_3 GDP_i + \gamma_4 EDU_i + \gamma_5 ENV_i + v_i
+$$
+
+Nous évaluons ensuite dans quelle mesure les instruments expliquent la variable endogène.\
+Si leur corrélation est trop faible, le modèle 2SLS devient **peu fiable**, même s'il est théoriquement bien spécifié.
+
+Pour évaluer la force de nos instruments, nous nous appuyons sur la statistique F de la première régression, conformément au test de Staiger & Stock (1997). Selon cette référence, une statistique **F \<10** indique des instruments faibles, pouvant conduire à des estimations biaisées, instables ou non convergentes dans le cadre du 2SLS.
+
+**Résultats du test :**
+
+$$ H0 : Les\ instruments\ sont \ faibles $$
+
+$$ H1 : Les \ instruments \ sont \ forts $$
+
+Le test des donne une statistique F de **11.507** avec une p-value \< 0.001. On rejette l'hypothèse nulle au seuil de 1 %. Nos instruments sont **suffisamment** **corrélés** avec la variable endogène (dépense de santé).
+
+Nous pouvons donc considérer qu’ils sont **pertinents** et poursuivre avec l’**estimation par la méthode 2SLS**.
+
 ## Méthode 2SLS
 
+Étant donné la présence d’endogénéité dans la variable Health_Expenditure_log, identifiée grâce au test de Wu-Hausman, nous utilisons la méthode des deux moindres carrés (2SLS) pour obtenir des estimations non biaisées.
+
+La méthode se déroule en deux étapes :
+
+**Étape 1 – Forme réduite :**
+
+On prédit la variable endogène à l’aide des instruments et des variables exogènes :
+
+$$
+HE_i = \gamma_0 + \gamma_1 POL_i + \gamma_2 POP65_i + \gamma_3 GDP_i + \gamma_4 EDU_i + \gamma_5 ENV_i + v_i
+$$
+
+On en extrait les **valeurs ajustées** ($\widehat{HE}_i$)
+
+**Étape 2 – Substitution dans le modèle structurel :**
+
+On remplace la variable endogène par sa valeur prédite et on estime le modèle suivant :
+
+$$
+LE_i = \beta_0 + \beta_1 GDP_i +\beta_2 \widehat{HE}_i  + \beta_3 EDU_i + \beta_4 ENV_i + u_i
+$$
+
+Cette approche permet de **corriger le biais** d’endogénéité en utilisant uniquement la variation exogène de HE car on a remplacé HE par sa version purifiée qui est exogène.
+
+```{r}
+
+Estimation_2sls <- ivreg(Life_Expectancy~GDP_log+Health_Expenditure_log+Education+Pollution | Corruption+Population_65+GDP_log+Education+Pollution, data = data)
+
+summary(Estimation_2sls, diagnostics = TRUE)
+
+```
+
 ## Analyse des résultats
+
+Nous présentons ici les résultats du modèle estimé par la méthode des doubles moindres carrés (2SLS), à l’aide des instruments Corruption et Population_65.
+
+Le coefficient associé à la dépense de santé Health_Expenditure_log est positif et **significatif au seuil de 5 %** ($\hat{\beta}_2 = 5.29$, p = 0.0106). Cela indique qu'une augmentation des dépenses de santé est associée à une augmentation de l'espérance de vie, **une fois l’endogénéité corrigée**.
+
+Cependant, les coefficients des autres variables (GDP_log, Education, Pollution) ne sont pas significatifs, ce qui pourrait s’expliquer par des colinéarités, une faible variation entre pays, ou une relation plus indirecte avec la variable dépendante.
+
+### Test de Sargan
+
+Le test de Sargan (ou test de sur-identification) permet de vérifier la **validité globale des instruments** dans un modèle IV (2SLS), à condition que le modèle soit sur-identifié.
+
+Notre modèle est **sur-identifié**, car nous utilisons deux instruments (Corruption et Population_65) pour une seule variable endogène (Health_Expenditure_log).
+
+Ce test est donc une **étape essentielle** pour s’assurer que l’identification du modèle IV repose sur des instruments économétriquement solides.
+
+.$$H₀ : Les\ instruments\ sont \ valides, c’est-à-dire\ non\ corrélés\ au\ terme \ d’erreur \ de\ l’équation\ structurelle.$$
+
+$H₁ : Au\ moins\ un\ instrument\ est\ corrélé\ au\ terme\ d’erreur\ → donc\ non\ valide.$
+
+Le test retourne une statistique de **0.352** avec une **p-value = 0.5528** \> 5%. On accepte H0, **les instruments sont valides.**
+
+## Conclusion partielle
+
+L’ensemble des tests effectués confirme la pertinence de la méthode des doubles moindres carrés (2SLS) pour estimer notre modèle.
+
+\- Le test de Wu-Hausman indique que la variable Health_Expenditure_log est endogène.
+
+\- Le test week instrument montre que Corruption et Population_65 sont suffisamment corrélés à la variable endogène.
+
+\- Le test de Sargan confirme que nos instruments sont valides , c’est-à-dire non corrélés avec le terme d’erreur.
+
+Nous disposons donc d’un modèle économétrique solide, qui permet d’interpréter de manière causale l’effet des dépenses de santé sur l’espérance de vie.
 
 # Traitement de la multicolinéarité
 
 La multi-colinéarité complique l'interprétation des coefficients de régression, rendant difficile d'isoler l'impact de chaque variable. Cela peut aussi rendre les modèles moins stables et augmenter la variance des coefficients, ce qui fausse les conclusions tirées des analyses statistiques.
 
-## Identification du problème de multicolinéarité 
+## Identification du problème de multicolinéarité et VIF
 
-D'abord on regarde avec la matrice de correlation : 
+D'abord on regarde avec la matrice de correlation :
 
 ```{r}
 ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
 ```
 
-On remarque certaines valeurs sont très proches de 0.8 et certaines au dessus, ce qui nous indique un problème de multicolinéarité. 
-Réalisons une regression via MCO : 
+On remarque certaines valeurs sont très proches de 0.8 et certaines au dessus, ce qui nous indique un problème de multicolinéarité. Réalisons une regression via MCO :
 
 ```{r}
 data_no_country <- data %>%
@@ -294,13 +438,18 @@ MCO <- lm(Life_Expectancy ~ ., data = data_no_country)
 summary(MCO)
 ```
 
-### VIF
-
 ```{r}
 library(car)
 vif(MCO)
 ```
 
+On identifie un problème de multicolinéarité sur les variables :
+
+-   GDP_log
+
+-   Health_Expenditure_log
+
+Pour résoudre ce problème, on va utiliser plusieurs méthodes comme la régression en composantes principales, la regression et la méthode Lasso.
 
 ## Regression en composantes principales
 
@@ -308,14 +457,228 @@ vif(MCO)
 sum(is.na(data))
 ```
 
+```{r}
+library(pls)
+pcr_est <- pcr(Life_Expectancy ~ ., data = data_no_country, jackknife = TRUE, validation = "CV", ncomp=6)
+summary(pcr_est)
+```
+
+```{r}
+par(mfrow=c(2,2))
+validationplot(pcr_est,legendpos= "topright")
+validationplot(pcr_est, val.type="MSEP",legendpos= "topright")
+validationplot(pcr_est, val.type="R2")
+
+```
+
+On remarque que la bonne valeur de composantes est 4.
+
+```{r}
+pcr_est_2 <- pcr(Life_Expectancy ~ ., data = data_no_country, jackknife = TRUE, validation = "CV", ncomp=4)
+summary(pcr_est)
+```
+
+```{r}
+par(mfrow=c(2,2))
+validationplot(pcr_est_2,legendpos= "topright")
+validationplot(pcr_est_2, val.type="MSEP",legendpos= "topright")
+validationplot(pcr_est_2, val.type="R2")
+plot(pcr_est_2, ncomp=4,  line=TRUE)
+```
+
+Dès lors on récupère les 4 composantes :
+
+```{r}
+coefficients(pcr_est_2, ncomp=4)
+```
+
+```{r}
+coefplot(pcr_est_2, ncomp=4, se.whiskers = TRUE, labels = prednames(pcr_est), cex.axis = 0.5)
+```
+
+```{r}
+prednames(pcr_est_2)
+```
+
+## Moindres carrés partiels (PLS)
 
 ```{r}
 library(pls)
-pcr_est <- pcr(Life_Expectancy ~ ., data = data, jackknife = TRUE, validation = "CV")
+pls_est_3 <- plsr(Life_Expectancy~., data=data_no_country, scale=TRUE, jackknife=TRUE, validation="CV")
+summary(pls_est)
 ```
 
+### Choix du nombre de composantes
 
-## Méthode de pénalisation
+Avec le critère RMSEP on choisit 4 composantes.
+
+```{r}
+pls_est_4 <- plsr(Life_Expectancy~., data=data_no_country, jackknife=TRUE, validation="CV", ncomp=4)
+par(mfrow=c(2,2))
+validationplot(pls_est_4,legendpos= "topright")
+validationplot(pls_est_4, val.type="MSEP",legendpos= "topright")
+validationplot(pls_est_4, val.type="R2")
+```
+
+### Coefficients estimés avec 12 composantes
+
+```{r}
+coefficients(pls_est_4, ncomp=4)
+```
+
+```{r}
+coefplot(pls_est_4, ncomp=4, se.whiskers = TRUE, labels = prednames(pls_est_4), cex.axis = 0.5)
+```
+
+### Prédiction
+
+```{r}
+colnames(data_no_country)
+```
+
+```{r}
+train <- data[1:120, c("Corruption", "Education", "Life_Expectancy", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")]
+y_test <- data[121:nrow(data_no_country), c("Life_Expectancy")]
+test <- data[120:nrow(data_no_country), c("Corruption", "Education", "Life_Expectancy", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")]
+
+model_pls <- plsr(Life_Expectancy ~ ., data=train, scale=TRUE, jackknife=TRUE, validation="CV")
+summary(model_pls)
+
+```
+
+```{r}
+RMSEP(model_pls, newdata = test)
+pcr_pred_pls <- predict(model_pls, newdata=test, ncomp = 4)
+```
+
+Calcul du RMSE sur la base test pour les différentes composantes.
+
+```{r}
+RMSEP(pls_est_4, newdata = test) 
+```
+
+## Méthode pénalisation
+
+```{r}
+library(caret)
+data_preprocessed <- preProcess(as.data.frame(data), method=c("center", "scale"))
+data <- predict(data_preprocessed, as.data.frame(data))
+summary(data)
+
+```
+
+```{r}
+library(tidyverse)
+train.samples <- data_preprocessed_pred$Life_Expectancy %>% createDataPartition(p=0.5, list = FALSE)
+train.data <- data[train.samples,]
+test.data <-  data[- train.samples,]
+```
+
+## GLMNET
+
+```{r}
+library(glmnet)
+Y_train<- as.matrix(train.data[, c("Life_Expectancy")])
+X_train<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
+
+Y_test<- as.matrix(train.data[, c("Life_Expectancy")])
+X_test<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
+```
+
+### Estimation avec la méthode Ridge 
+
+```{r}
+ridge_glmnet <- glmnet(X_train, Y_train, family ="gaussian", alpha =0)
+plot(ridge_glmnet, xvar="lambda") 
+```
+
+### Détermination de lambda par validation croisée
+
+```{r}
+cv.ridge <- cv.glmnet(X_train, Y_train, family ="gaussian", alpha =0, type.measure="mse",lambda = exp( seq(0,10,length=100 )))
+
+plot(cv.ridge)
+```
+
+```{r}
+bestlam<- cv.ridge$lambda.min
+####prediction 
+y.pred <- predict(cv.ridge$glmnet.fit, newx=X_test, s= cv.ridge$lambda.min, type = "response")
+###qualité ajustement
+SST <- sum((Y_test-mean(Y_test))^2)
+SSE <- sum((y.pred - Y_test)^2)
+rsquare <- 1 - SSE/SST
+rsquare
+```
+
+## Régression Lasso
+
+### Estimation des paramètres en fonction de lambda
+
+```{r}
+lasso_glmnet <- glmnet(X_train, Y_train, family ="gaussian", alpha =1)
+plot(lasso_glmnet, xvar="lambda") 
+```
+
+### Détermination de lambda par validation croisée
+
+```{r}
+cv.lasso <- cv.glmnet(X_train, Y_train, family ="gaussian", alpha =1, type.measure="mse",lambda = exp( seq(-10,0,length=100 )))
+plot(cv.lasso)
+```
+
+```{r}
+print(coef(cv.lasso, s= "lambda.min"))
+```
+
+```{r}
+####predictions
+y.pred <- predict(cv.lasso$glmnet.fit, newx=X_test, s= cv.lasso$lambda.min, type = "response")
+
+###qualité ajustement
+SST <- sum((Y_test-mean(Y_test))^2)
+SSE <- sum((y.pred - Y_test)^2)
+rsquare <- 1 - SSE/SST
+rsquare
+```
+
+## Ridge
+
+```{r}
+train.samples <- data_preprocessed_pred$Life_Expectancy %>% createDataPartition(p=0.5, list = FALSE)
+
+train.data <- data[train.samples,]
+test.data <-  data[- train.samples,]
+
+Y_train<- as.matrix(train.data[, c("Life_Expectancy")])
+X_train<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
+
+Y_test<- as.matrix(train.data[, c("Life_Expectancy")])
+X_test<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
+```
+
+```{r}
+lambda <- 10^seq(-3, 3, length = 100)
+
+ridge <- train(
+  Life_Expectancy ~., data = train.data, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneGrid = expand.grid(.alpha = 0, .lambda = lambda)
+  )
+
+bestLambda <- ridge$bestTune$lambda
+bestLambda
+```
+
+```{r}
+# Make predictions
+predictions <- ridge %>% predict(test.data)
+# Model prediction performance
+data.frame(
+  RMSE = RMSE(predictions, test.data$Life_Expectancy),
+  Rsquare = R2(predictions, test.data$Life_Expectancy)
+)
+```
 
 # Double Machine Learning
 
