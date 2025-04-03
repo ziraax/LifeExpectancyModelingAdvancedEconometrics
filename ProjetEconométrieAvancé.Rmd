@@ -671,6 +671,7 @@ bestLambda
 ```
 
 ```{r}
+ridge
 # Make predictions
 predictions <- ridge %>% predict(test.data)
 # Model prediction performance
