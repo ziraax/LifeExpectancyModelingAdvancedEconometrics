@@ -133,12 +133,12 @@ write.csv(df_wide, "./DATA/data_transformed_clean.csv", row.names = FALSE)
 
 # Statistiques descriptives
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(GGally)
 library(ggcorrplot)
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 data <- read_delim("DATA/data_transformed_clean.csv")
 ```
 
@@ -419,6 +419,13 @@ Nous disposons donc d’un modèle économétrique solide, qui permet d’interp
 
 La multi-colinéarité complique l'interprétation des coefficients de régression, rendant difficile d'isoler l'impact de chaque variable. Cela peut aussi rendre les modèles moins stables et augmenter la variance des coefficients, ce qui fausse les conclusions tirées des analyses statistiques.
 
+#### Import des librairies
+
+```{r message=FALSE, warning=FALSE}
+library(car)
+library(caret)
+```
+
 ## Identification du problème de multicolinéarité et VIF
 
 D'abord on regarde avec la matrice de correlation :
@@ -427,7 +434,7 @@ D'abord on regarde avec la matrice de correlation :
 ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
 ```
 
-On remarque certaines valeurs sont très proches de 0.8 et certaines au dessus, ce qui nous indique un problème de multicolinéarité. Réalisons une regression via MCO :
+On remarque certaines valeurs sont très proches de 0.8 et certaines au dessus, ce qui nous indique un problème de multicolinéarité. Réalisons une regression via MCO puis regardons le VIF (Variance Inflation Factor) :
 
 ```{r}
 data_no_country <- data %>%
@@ -439,7 +446,6 @@ summary(MCO)
 ```
 
 ```{r}
-library(car)
 vif(MCO)
 ```
 
@@ -449,238 +455,824 @@ On identifie un problème de multicolinéarité sur les variables :
 
 -   Health_Expenditure_log
 
-Pour résoudre ce problème, on va utiliser plusieurs méthodes comme la régression en composantes principales, la regression et la méthode Lasso.
+Pour résoudre ce problème, nous allons utiliser plusieurs méthodes comme la régression en composantes principales, par moindres carrés partiels puis avec des méthodes de pénalisation.
 
-## Regression en composantes principales
+### Definition des données d'entrainement et de test
 
-```{r}
-sum(is.na(data))
-```
+```{r message=FALSE, warning=FALSE}
 
-```{r}
-library(pls)
-pcr_est <- pcr(Life_Expectancy ~ ., data = data_no_country, jackknife = TRUE, validation = "CV", ncomp=6)
-summary(pcr_est)
-```
-
-```{r}
-par(mfrow=c(2,2))
-validationplot(pcr_est,legendpos= "topright")
-validationplot(pcr_est, val.type="MSEP",legendpos= "topright")
-validationplot(pcr_est, val.type="R2")
-
-```
-
-On remarque que la bonne valeur de composantes est 4.
-
-```{r}
-pcr_est_2 <- pcr(Life_Expectancy ~ ., data = data_no_country, jackknife = TRUE, validation = "CV", ncomp=4)
-summary(pcr_est)
-```
-
-```{r}
-par(mfrow=c(2,2))
-validationplot(pcr_est_2,legendpos= "topright")
-validationplot(pcr_est_2, val.type="MSEP",legendpos= "topright")
-validationplot(pcr_est_2, val.type="R2")
-plot(pcr_est_2, ncomp=4,  line=TRUE)
-```
-
-Dès lors on récupère les 4 composantes :
-
-```{r}
-coefficients(pcr_est_2, ncomp=4)
-```
-
-```{r}
-coefplot(pcr_est_2, ncomp=4, se.whiskers = TRUE, labels = prednames(pcr_est), cex.axis = 0.5)
-```
-
-```{r}
-prednames(pcr_est_2)
-```
-
-## Moindres carrés partiels (PLS)
-
-```{r}
-library(pls)
-pls_est_3 <- plsr(Life_Expectancy~., data=data_no_country, scale=TRUE, jackknife=TRUE, validation="CV")
-summary(pls_est)
-```
-
-### Choix du nombre de composantes
-
-Avec le critère RMSEP on choisit 4 composantes.
-
-```{r}
-pls_est_4 <- plsr(Life_Expectancy~., data=data_no_country, jackknife=TRUE, validation="CV", ncomp=4)
-par(mfrow=c(2,2))
-validationplot(pls_est_4,legendpos= "topright")
-validationplot(pls_est_4, val.type="MSEP",legendpos= "topright")
-validationplot(pls_est_4, val.type="R2")
-```
-
-### Coefficients estimés avec 12 composantes
-
-```{r}
-coefficients(pls_est_4, ncomp=4)
-```
-
-```{r}
-coefplot(pls_est_4, ncomp=4, se.whiskers = TRUE, labels = prednames(pls_est_4), cex.axis = 0.5)
-```
-
-### Prédiction
-
-```{r}
-colnames(data_no_country)
-```
-
-```{r}
-train <- data[1:120, c("Corruption", "Education", "Life_Expectancy", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")]
-y_test <- data[121:nrow(data_no_country), c("Life_Expectancy")]
-test <- data[120:nrow(data_no_country), c("Corruption", "Education", "Life_Expectancy", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")]
-
-model_pls <- plsr(Life_Expectancy ~ ., data=train, scale=TRUE, jackknife=TRUE, validation="CV")
-summary(model_pls)
-
-```
-
-```{r}
-RMSEP(model_pls, newdata = test)
-pcr_pred_pls <- predict(model_pls, newdata=test, ncomp = 4)
-```
-
-Calcul du RMSE sur la base test pour les différentes composantes.
-
-```{r}
-RMSEP(pls_est_4, newdata = test) 
-```
-
-## Méthode pénalisation
-
-```{r}
-library(caret)
 data_preprocessed <- preProcess(as.data.frame(data), method=c("center", "scale"))
-data <- predict(data_preprocessed, as.data.frame(data))
-summary(data)
+data_preprocessed <- predict(data_preprocessed, as.data.frame(data))
+# Supprimer les colonnes non numériques
+data_model <- data_preprocessed[, !(names(data_preprocessed) %in% c("Country_Name", "Country_code"))]
+
+set.seed(123)
+train_index <- createDataPartition(data_model$Life_Expectancy, p = 0.8, list = FALSE)
+train_data <- data_model[train_index, ]
+test_data  <- data_model[-train_index, ]
 
 ```
 
-```{r}
-library(tidyverse)
-train.samples <- data_preprocessed_pred$Life_Expectancy %>% createDataPartition(p=0.5, list = FALSE)
-train.data <- data[train.samples,]
-test.data <-  data[- train.samples,]
-```
+## PCR & PLS
 
-## GLMNET
+Pour faire face au problème de multicolinéarité, deux approches de régression sur composantes sont couramment utilisées : la régression sur composantes principales (PCR) et la régression sur moindres carrés partiels (PLS).
 
-```{r}
-library(glmnet)
-Y_train<- as.matrix(train.data[, c("Life_Expectancy")])
-X_train<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
+Intérêt économétrique
 
-Y_test<- as.matrix(train.data[, c("Life_Expectancy")])
-X_test<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
-```
+-   réduction de dimension : ces méthodes permettent de résumer l'information contenue dans de nombreuses variables explicatives par quelques composantes non corrélées (orthogonales).
 
-### Estimation avec la méthode Ridge
+-   résistance à la multicolinéarité : elles contournent le problème en travaillant sur des combinaisons linéaires des variables initiales.
 
-```{r}
-ridge_glmnet <- glmnet(X_train, Y_train, family ="gaussian", alpha =0)
-plot(ridge_glmnet, xvar="lambda") 
-```
+-   stabilité des modèles : les coefficients estimés sont moins sensibles aux données bruitées ou corrélées.
 
-### Détermination de lambda par validation croisée
+-   interprétation globale : même si les composantes ne sont pas toujours directement interprétables économiquement, elles capturent l’essentiel de la structure des données.
+
+### Régression en composantes principales
+
+Pour rappel, la regression en composantes principales s'effectue comme :
+
+-   Étape 1 : effectuer une analyse en composantes principales (ACP) sur les variables explicatives X, afin d’obtenir des composantes principales orthogonales.
+
+-   Étape 2 : sélectionner un certain nombre k de composantes qui expliquent la majorité de la variance de X.
+
+-   Étape 3 : effectuer une régression linéaire classique de la variable dépendante Y sur ces k composantes principales.
 
 ```{r}
-cv.ridge <- cv.glmnet(X_train, Y_train, family ="gaussian", alpha =0, type.measure="mse",lambda = exp( seq(0,10,length=100 )))
+library(pls)
+# Entraînement du modèle PCR avec validation croisée
+pcr_fit <- pcr(
+  Life_Expectancy ~ .,  # Cible : Life_Expectancy, toutes les autres variables comme prédicteurs
+  data = train_data,
+  scale = FALSE,  # Les données sont déjà mises à l'échelle
+  validation = "CV",  # Validation croisée
+  jackknife = TRUE
 
-plot(cv.ridge)
-```
-
-```{r}
-bestlam<- cv.ridge$lambda.min
-####prediction 
-y.pred <- predict(cv.ridge$glmnet.fit, newx=X_test, s= cv.ridge$lambda.min, type = "response")
-###qualité ajustement
-SST <- sum((Y_test-mean(Y_test))^2)
-SSE <- sum((y.pred - Y_test)^2)
-rsquare <- 1 - SSE/SST
-rsquare
-```
-
-## Régression Lasso
-
-### Estimation des paramètres en fonction de lambda
-
-```{r}
-lasso_glmnet <- glmnet(X_train, Y_train, family ="gaussian", alpha =1)
-plot(lasso_glmnet, xvar="lambda") 
-```
-
-### Détermination de lambda par validation croisée
-
-```{r}
-cv.lasso <- cv.glmnet(X_train, Y_train, family ="gaussian", alpha =1, type.measure="mse",lambda = exp( seq(-10,0,length=100 )))
-plot(cv.lasso)
-```
-
-```{r}
-print(coef(cv.lasso, s= "lambda.min"))
-```
-
-```{r}
-####predictions
-y.pred <- predict(cv.lasso$glmnet.fit, newx=X_test, s= cv.lasso$lambda.min, type = "response")
-
-###qualité ajustement
-SST <- sum((Y_test-mean(Y_test))^2)
-SSE <- sum((y.pred - Y_test)^2)
-rsquare <- 1 - SSE/SST
-rsquare
-```
-
-## Ridge
-
-```{r}
-train.samples <- data_preprocessed_pred$Life_Expectancy %>% createDataPartition(p=0.5, list = FALSE)
-
-train.data <- data[train.samples,]
-test.data <-  data[- train.samples,]
-
-Y_train<- as.matrix(train.data[, c("Life_Expectancy")])
-X_train<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
-
-Y_test<- as.matrix(train.data[, c("Life_Expectancy")])
-X_test<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
-```
-
-```{r}
-lambda <- 10^seq(-3, 3, length = 100)
-
-ridge <- train(
-  Life_Expectancy ~., data = train.data, method = "glmnet",
-  trControl = trainControl("cv", number = 10),
-  tuneGrid = expand.grid(.alpha = 0, .lambda = lambda)
-  )
-
-bestLambda <- ridge$bestTune$lambda
-bestLambda
-```
-
-```{r}
-ridge
-# Make predictions
-predictions <- ridge %>% predict(test.data)
-# Model prediction performance
-data.frame(
-  RMSE = RMSE(predictions, test.data$Life_Expectancy),
-  Rsquare = R2(predictions, test.data$Life_Expectancy)
 )
+
+# Résumé du modèle PCR
+summary(pcr_fit)
+
+# Affichage du RMSEP
+plot(RMSEP(pcr_fit), main = "PCR - RMSEP vs Nombre de composantes")
+
+# Affichage de la variance expliquée par composante
+r2_pcr <- explvar(pcr_fit)
+barplot(r2_pcr, main = "Variance expliquée par composante - PCR", xlab = "Composantes", ylab = "% Variance")
+
+
 ```
+
+### Régression par moindres carrés partiels (PLS)
+
+Pour rappel, la régression par moindre carrés partiels s'effectue en suivante ces étapes :
+
+-   Étape 1 : au lieu de faire une ACP classique, PLS cherche à construire des composantes latentes de X qui maximisent la covariance avec Y (et non seulement la variance de X).
+
+-   Étape 2 : les composantes sont extraites séquentiellement, chacune maximisant l'information utile pour prédire YY.
+
+-   Étape 3 : on régressse ensuite YY sur ces composantes.
+
+Remarque : PLS est souvent plus performant que PCR lorsque l’objectif est prédictif, car il utilise explicitement l’information de Y pour orienter la construction des composantes.
+
+```{r}
+# Entraînement du modèle PLS avec validation croisée
+pls_fit <- plsr(
+  Life_Expectancy ~ .,  # Cible : Life_Expectancy, toutes les autres variables comme prédicteurs
+  data = train_data,
+  scale = FALSE,  # Les données sont déjà mises à l'échelle
+  validation = "CV",  # Validation croisée
+  jackknife = TRUE
+)
+
+# Résumé du modèle PLS
+summary(pls_fit)
+
+# Affichage du RMSEP
+plot(RMSEP(pls_fit), main = "PLS - RMSEP vs Nombre de composantes")
+
+# Affichage de la variance expliquée par composante
+r2_pls <- explvar(pls_fit)
+barplot(r2_pls, main = "Variance expliquée par composante - PLS", xlab = "Composantes", ylab = "% Variance")
+
+```
+
+On obtient alors :
+
+\\begin{array} \\hline \\textbf{Modèle} & \\textbf{RMSEP minimum (adjCV)} & \\textbf{Nb de composantes optimales} \\\\ \\hline PCR & 0.4729 & 5 composantes \\\\ PLS & 0.4766 & 4 composantes \\\\ \\hline \\end{array}
+
+### Prédiction & évaluation
+
+```{r}
+
+pcr_pred <- predict(pcr_fit, newdata = test_data)
+pls_pred <- predict(pls_fit, newdata = test_data)
+
+# Si la dernière dimension correspond aux "composantes", alors pour récupérer
+# les prédictions de la dernière composante, on sélectionne simplement :
+pcr_pred_final <- pcr_pred[, 1, 5]  # 5 est l'indice de la dernière composante
+pls_pred_final <- pls_pred[, 1, 4]  # 4 est l'indice de la dernière composante
+
+# Calcul des métriques pour PCR
+rmse_pcr <- sqrt(mean((pcr_pred_final - test_data$Life_Expectancy)^2))
+mae_pcr <- mean(abs(pcr_pred_final - test_data$Life_Expectancy))
+r2_pcr <- cor(pcr_pred_final, test_data$Life_Expectancy)^2
+
+# Calcul des métriques pour PLS
+rmse_pls <- sqrt(mean((pls_pred_final - test_data$Life_Expectancy)^2))
+mae_pls <- mean(abs(pls_pred_final - test_data$Life_Expectancy))
+r2_pls <- cor(pls_pred_final, test_data$Life_Expectancy)^2
+
+# Affichage des résultats
+performance_pcr_pls <- data.frame(
+  Modèle = c("PCR", "PLS"),
+  RMSE = c(rmse_pcr, rmse_pls),
+  Rsquared = c(r2_pcr, r2_pls),
+  MAE = c(mae_pcr, mae_pls)
+)
+
+print(performance_pcr_pls)
+
+```
+
+Les résultats de la validation croisée montrent des performances très proches entre les deux approches.
+
+On observe que :
+
+-   Le PLS présente une légère supériorité sur tous les critères de performance : un RMSE (Root Mean Square Error) plus bas, un R2R2 plus élevé, et une MAE (Mean Absolute Error) plus faible.
+
+-   Cette amélioration, bien que marginale, confirme l’avantage du PLS lorsque l’objectif est la prédiction de la variable dépendante (ici, l’espérance de vie). En effet, PLS utilise l’information de la variable cible pour construire les composantes, ce qui le rend plus adapté aux tâches prédictives que PCR.
+
+-   En revanche, la proximité des résultats suggère que dans ce cas précis, la structure des données est telle que la variance de XX (capturée par PCR) est déjà fortement corrélée à YY, ce qui explique les performances proches.
+
+### Graphique des prédictions
+
+```{r}
+# Créer un dataframe avec les prédictions et les vraies valeurs
+comparison_df <- data.frame(
+  Observed = test_data$Life_Expectancy,
+  PCR = pcr_pred_final,
+  PLS = pls_pred_final
+)
+
+# Graphique des prédictions
+ggplot(comparison_df, aes(x = Observed)) +
+  geom_point(aes(y = PCR, color = "PCR"), size = 2, alpha = 0.7) +
+  geom_point(aes(y = PLS, color = "PLS"), size = 2, alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    title = "Comparaison des prédictions : PCR vs PLS",
+    x = "Valeurs observées",
+    y = "Valeurs prédites",
+    color = "Modèle"
+  ) +
+  theme_minimal()
+
+```
+
+### Analyse des coefficients
+
+```{r message=FALSE, warning=FALSE}
+
+# Plot des coefficients avec barres d’erreur pour le modèle PLS
+coefplot(
+  pls_fit,
+  ncomp = 4,
+  se.whiskers = TRUE,                            # Affiche les whiskers (SE)
+  labels = prednames(pls_fit),                   # Affiche les noms des variables
+  cex.axis = 0.7,                                # Taille de l’axe
+  main = "Coefficients PLS (4 composantes)"
+)
+
+coefplot(
+  pcr_fit,
+  ncomp = 5,
+  se.whiskers = TRUE,
+  labels = prednames(pcr_fit),
+  cex.axis = 0.7,
+  main = "Coefficients PCR (5 composantes)"
+)
+
+
+```
+
+Dans les deux modèles, **Corruption** et **Pollution** ont des barres d’erreur qui **incluent zéro**, ce qui suggère qu’à ce niveau de précision, **ces variables ne sont pas statistiquement significatives** dans la construction des composantes utilisées pour prédire l’espérance de vie.
+
+En pratique, cela peut suggérer que :
+
+-   Ces variables sont **faiblement corrélées aux composantes principales utilisées**.
+
+-   Elles **n’apportent pas d’information supplémentaire significative** par rapport aux autres variables incluses.
+
+#### **GDP_log**
+
+-   Coefficient élevé, positif, **significatif**.
+
+-   Cela suggère que le niveau de richesse du pays (log du PIB par habitant) est **fortement et positivement corrélé à l’espérance de vie**.
+
+-   Plus un pays est riche, plus ses habitants vivent longtemps – une intuition classique confirmée par le modèle.
+
+#### **Education**
+
+-   Coefficient positif et significatif.
+
+-   Cela indique que **l’éducation contribue positivement à l’espérance de vie**. Les pays avec un meilleur niveau moyen d’éducation tendent à avoir une population en meilleure santé et plus longue.
+
+#### **Health_Expenditure_log**
+
+-   Positif et significatif également.
+
+-   Confirme que **les dépenses de santé sont un déterminant clé de la longévité**. Ce résultat est d’ailleurs en ligne avec ton estimation en DML : un effet causal fort.
+
+#### **Population_65**
+
+-   Soit une population vieillissante est **associée à une espérance de vie plus longue**, ce qui peut être interprété comme un effet de structure démographique.
+
+-   Soit elle **capture une variable de confusion** (ex. un effet historique de longévité déjà élevée).
+
+## Régressions pénalisées
+
+En économétrie, les **méthodes de régression pénalisée** telles que **Ridge**, **Lasso** et **Elastic Net** sont particulièrement utiles dans les contextes où les variables explicatives sont nombreuses, corrélées ou quand il y a un risque de surapprentissage (*overfitting*). Ces méthodes offrent une solution robuste face à la **multicolinéarité** et permettent d'améliorer la **précision prédictive** tout en assurant une forme de **sélection de variables**.
+
+La démarche consiste à **modifier la fonction de coût** classique des moindres carrés en ajoutant un **terme de pénalisation** qui contraint la taille des coefficients. Cela permet d’éviter les modèles trop complexes et d’améliorer la généralisation.
+
+Par ailleurs, dans un contexte causal, bien qu’elles soient avant tout conçues pour la **prédiction**, ces méthodes peuvent être utilisées comme **pré-traitement** ou pour aider à la **sélection des variables** à inclure dans un modèle structurel plus classique (comme le DML).
+
+### Ridge
+
+**Ridge regression** (ou régression à Tikhonov) ajoute une **pénalité L2** sur les coefficients :
+
+$$
+\min_{\beta} \| y - X\beta \|^2 + \lambda \| \beta \|_2^2
+$$
+
+Cette pénalisation **réduit la variance** des estimations sans les annuler. Elle est efficace en cas de **multicolinéarité**, mais ne fait pas de sélection de variables.
+
+#### Définir le modèle avec caret
+
+```{r}
+# Grille pour Ridge : alpha = 0 uniquement
+ridge_grid <- expand.grid(
+  alpha = 0,
+  lambda = 10^seq(-4, 1, length = 1000)
+)
+
+ridge_model <- train(
+  Life_Expectancy ~ ., 
+  data = train_data,
+  method = "glmnet",
+  tuneGrid = ridge_grid,
+  trControl = ctrl
+)
+
+# Affichage des meilleurs paramètres
+ridge_model$bestTune
+plot(ridge_model)
+
+```
+
+On obtient une valeur de lambda (paramètre de pénalité) de 0.085.
+
+-   Le modèle n’a pas besoin d’une très forte pénalisation,
+
+<!-- -->
+
+-   Il y a de la **multicolinéarité modérée** ou **quelques variables redondantes**, mais pas au point de nécessiter un rétrécissement extrême des coefficients,
+
+### Lasso
+
+**Lasso** (Least Absolute Shrinkage and Selection Operator) ajoute une **pénalité L1** :
+
+$$
+\min_{\beta} \| y - X \beta \|^2 + \lambda \| \beta \|_1
+$$
+
+Contrairement au Ridge, le Lasso peut **annuler certains coefficients** exactement à zéro, ce qui permet une **sélection automatique des variables**.
+
+#### Définir le modèle avec caret
+
+```{r}
+set.seed(123)
+
+# Grille pour Lasso : alpha = 1 uniquement
+lasso_grid <- expand.grid(
+  alpha = 1,
+  lambda = 10^seq(-4, 1, length = 100)
+)
+
+lasso_model <- train(
+  Life_Expectancy ~ ., 
+  data = train_data,
+  method = "glmnet",
+  tuneGrid = lasso_grid,
+  trControl = ctrl
+)
+
+# Affichage des meilleurs paramètres
+lasso_model$bestTune
+plot(lasso_model)
+
+```
+
+Le fait que **Lasso sélectionne un lambda relativement faible** (0.0376) nous dit :
+
+-   **Une petite régularisation suffit** à améliorer légèrement la performance du modèle, probablement en éliminant ou en réduisant certains coefficients.
+
+-   À ce niveau de lambda, Lasso va :
+
+    -   **Réduire certains coefficients à zéro** (sélection de variables),
+
+    -   Et **réduire la variance du modèle** tout en maintenant un bon biais.
+
+### Elastic Net
+
+L'Elastic Net combine les régularisations **L1 (Lasso)** et **L2 (Ridge)**, permettant ainsi de profiter des avantages des deux méthodes. L'idée est de régulariser les coefficients pour éviter le surapprentissage, tout en conservant une certaine flexibilité dans la modélisation des relations.
+
+L'Elastic Net optimise l’objectif suivant :
+
+$$
+\min_{\beta} ( \frac{1}{2n} \sum_{i=1}^{n} (y_i - X_i \beta)^2 + \lambda[\alpha \sum_{j=1}^{p} |\beta_j| + \frac{1-\alpha}{2} \sum^{p}{j=1}\beta_j^2])
+$$
+
+Ou le premier terme est l'erreur quadratique moyenne (MSE) et le deuxième terme est composé des deux pénalisations Lasso et Ridge.
+
+#### Définir le modèle avec caret
+
+```{r message=FALSE, warning=FALSE}
+library(glmnet)
+
+# Grille de recherche alpha/lambda
+grid <- expand.grid(
+  alpha = seq(0, 1, by = 0.1),        # alpha de 0 (Ridge) à 1 (Lasso)
+  lambda = 10^seq(-4, 1, length = 100)  # lambda entre 0.0001 et 10
+)
+
+ctrl <- trainControl(
+  method = "cv", number = 10,
+  verboseIter = TRUE
+)
+
+set.seed(123)
+elastic_model <- train(
+  Life_Expectancy ~ ., 
+  data = train_data,
+  method = "glmnet",
+  tuneGrid = grid,
+  trControl = ctrl
+)
+
+```
+
+#### Résultats & visualisation des paramètres optimaux
+
+```{r}
+# Meilleurs paramètres
+elastic_model$bestTune
+
+# Visualisation des performances
+plot(elastic_model)
+
+```
+
+Le modèle **Elastic Net** combine les avantages de **Ridge** et de **Lasso**, permettant une régularisation flexible et une meilleure gestion des interactions entre les variables. Le choix de **alpha = 0.2** et **lambda = 0.0954** suggère un compromis optimal entre la réduction de la variance (Ridge) et la sélection des variables explicatives (Lasso). Cette régularisation modérée permet de créer un modèle robuste tout en évitant la surpénalisation des coefficients, garantissant ainsi une bonne capacité de généralisation.
+
+### Prédiction & Evaluation pour les 3 modèles
+
+```{r}
+# Ridge
+ridge_pred <- predict(ridge_model, newdata = test_data)
+ridge_metrics <- postResample(pred = ridge_pred, obs = test_data$Life_Expectancy)
+
+# Lasso
+lasso_pred <- predict(lasso_model, newdata = test_data)
+lasso_metrics <- postResample(pred = lasso_pred, obs = test_data$Life_Expectancy)
+
+# Elastic Net
+elastic_pred <- predict(elastic_model, newdata = test_data)
+elastic_metrics <- postResample(pred = elastic_pred, obs = test_data$Life_Expectancy)
+```
+
+### Récupérer les coefficients des modèles
+
+```{r}
+# Coefficients Ridge
+ridge_coef <- coef(ridge_model$finalModel, s = ridge_model$bestTune$lambda)
+
+# Coefficients Lasso
+lasso_coef <- coef(lasso_model$finalModel, s = lasso_model$bestTune$lambda)
+
+# Coefficients Elastic Net
+elastic_coef <- coef(elastic_model$finalModel, s = elastic_model$bestTune$lambda)
+
+```
+
+### Graphique des prédictions observées vs prédites
+
+```{r}
+library(ggplot2)
+
+# Regrouper les prédictions
+results <- data.frame(
+  Observed = test_data$Life_Expectancy,
+  Ridge = ridge_pred,
+  Lasso = lasso_pred,
+  ElasticNet = elastic_pred
+)
+
+# Exemple : graphique Elastic Net
+ggplot(results, aes(x = Observed, y = ElasticNet)) +
+  geom_point(color = "royalblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Prédictions Elastic Net vs Observé",
+       x = "Life Expectancy Observée",
+       y = "Life Expectancy Prédites") +
+  theme_minimal()
+
+# Exemple : graphique Lasso 
+ggplot(results, aes(x = Observed, y = Lasso)) +
+  geom_point(color = "red") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Prédictions Lasso vs Observé",
+       x = "Life Expectancy Observée",
+       y = "Life Expectancy Prédites") +
+  theme_minimal()
+
+# Exemple : graphique Ridge
+ggplot(results, aes(x = Observed, y = Ridge)) +
+  geom_point(color = "green") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Prédictions Ridge vs Observé",
+       x = "Life Expectancy Observée",
+       y = "Life Expectancy Prédites") +
+  theme_minimal()
+
+```
+
+### Tableau comparatif des performances
+
+```{r}
+performance <- data.frame(
+  Modèle = c("Ridge", "Lasso", "Elastic Net"),
+  RMSE = c(ridge_metrics["RMSE"], lasso_metrics["RMSE"], elastic_metrics["RMSE"]),
+  Rsquared = c(ridge_metrics["Rsquared"], lasso_metrics["Rsquared"], elastic_metrics["Rsquared"]),
+  MAE = c(ridge_metrics["MAE"], lasso_metrics["MAE"], elastic_metrics["MAE"])
+)
+
+print(performance)
+
+```
+
+### Visualisation comparative
+
+```{r}
+library(reshape2)
+
+perf_melt <- melt(performance, id.vars = "Modèle")
+
+ggplot(perf_melt, aes(x = Modèle, y = value, fill = Modèle)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Comparaison des métriques de performance",
+       y = "Valeur",
+       x = "Modèle") +
+  scale_fill_brewer(palette = "Set2")
+
+```
+
+Les trois modèles de régression pénalisée, **Ridge**, **Lasso** et **Elastic Net**, ont été évalués sur la base de trois métriques principales : le **RMSE** (Root Mean Squared Error), le **R²** (coefficient de détermination) et le **MAE** (Mean Absolute Error).
+
+Le modèle **Lasso** se distingue par des performances supérieures quand bien même les performances sont toutes comparables. Il présente le plus faible **RMSE** (0.4748), le plus élevé **R²** (0.8141) et le plus bas **MAE** (0.3990), ce qui suggère qu'il est le meilleur pour prédire l'espérance de vie et expliquer la variabilité des données. Cette performance peut être attribuée à sa capacité à effectuer une régularisation plus stricte, éliminant les variables moins importantes et permettant une meilleure généralisation.
+
+Le modèle **Elastic Net**, qui combine les avantages de **Ridge** et de **Lasso**, suit de près **Lasso** en termes de performance, mais ses résultats sont légèrement inférieurs avec un **R²** de 0.8007 et un **RMSE** de 0.4808. Cependant, il reste une alternative robuste, capable de gérer des relations complexes entre les variables tout en maintenant une bonne interprétabilité.
+
+En revanche, le modèle **Ridge**, bien que performant, se situe derrière **Lasso** et **Elastic Net**, avec un **RMSE** de 0.4867, un **R²** de 0.7955 et un **MAE** de 0.4105. Ce modèle a tendance à conserver toutes les variables, ce qui limite sa capacité à se concentrer sur celles qui sont réellement influentes.
+
+En résumé, **Lasso** offre les meilleures performances globales, suivi par **Elastic Net**. **Ridge**, bien que toujours pertinent, montre une légère infériorité dans ce contexte spécifique.
+
+### Feature importance
+
+```{r}
+# Fonction pour extraire et trier les coefficients
+get_coefficients <- function(model, model_name) {
+  lambda <- model$bestTune$lambda
+  coef_matrix <- coef(model$finalModel, s = lambda)
+  coef_df <- as.data.frame(as.matrix(coef_matrix))
+  coef_df$Feature <- rownames(coef_df)
+  colnames(coef_df)[1] <- "Coefficient"
+  coef_df$Model <- model_name
+  coef_df <- coef_df[coef_df$Feature != "(Intercept)", ]  # retirer intercept
+  coef_df <- coef_df[coef_df$Coefficient != 0, ]          # garder que les coeff non nuls
+  coef_df <- coef_df[order(abs(coef_df$Coefficient), decreasing = TRUE), ]
+  return(coef_df)
+}
+
+ridge_imp <- get_coefficients(ridge_model, "Ridge")
+lasso_imp <- get_coefficients(lasso_model, "Lasso")
+elastic_imp <- get_coefficients(elastic_model, "Elastic Net")
+
+```
+
+```{r}
+all_coefs <- bind_rows(ridge_imp, lasso_imp, elastic_imp)
+
+top_vars <- all_coefs %>%
+  group_by(Feature) %>%
+  summarize(avg_coef = mean(abs(Coefficient))) %>%
+  top_n(10, wt = avg_coef) %>%
+  pull(Feature)
+
+# Filtrer pour les top variables
+plot_df <- all_coefs %>% filter(Feature %in% top_vars)
+
+ggplot(plot_df, aes(x = reorder(Feature, abs(Coefficient)), y = Coefficient, fill = Model)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(title = "Comparaison des coefficients par modèle",
+       x = "Variables",
+       y = "Coefficient") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2")
+
+
+```
+
+```{r}
+# Fusionner les trois modèles
+all_coefs <- bind_rows(ridge_imp, lasso_imp, elastic_imp)
+
+# Sélectionner les variables les plus influentes en moyenne
+top_vars_df <- all_coefs %>%
+  group_by(Feature) %>%
+  summarize(mean_abs_coef = mean(abs(Coefficient))) %>%
+  arrange(desc(mean_abs_coef)) %>%
+  slice(1:10)
+
+top_vars <- top_vars_df$Feature
+
+# Filtrer les coefficients pour ces variables
+filtered_coefs <- all_coefs %>%
+  filter(Feature %in% top_vars) %>%
+  select(Feature, Coefficient, Model) %>%
+  pivot_wider(names_from = Model, values_from = Coefficient)
+
+# Remplir les NA par 0 si une variable n'est pas présente dans un modèle
+filtered_coefs[is.na(filtered_coefs)] <- 0
+
+print(filtered_coefs)
+
+```
+
+-   **Lasso** tend à exclure certaines variables comme **Corruption** et **Pollution**, les considérant comme non pertinentes ou redondantes. Il favorise une structure de modèle plus parcimonieuse.
+
+-   **Ridge** conserve toutes les variables, mais avec des coefficients plus modérés, en particulier pour **Corruption** et **Pollution**, suggérant que la régularisation de Ridge réduit l'importance de ces variables sans les éliminer.
+
+-   **Elastic Net** semble offrir un bon compromis en combinant les avantages des deux régularisations. Il garde **Corruption** et **Pollution**, mais avec des coefficients plus faibles que dans **Ridge**, tout en étant plus sélectif que **Ridge** et moins drastique que **Lasso**.
+
+## Conclusion sur la multicolinéarité
+
+```{r}
+# Création d'un data.frame synthétique avec les 5 méthodes
+performance_all <- data.frame(
+  Modèle = c("Ridge", "Lasso", "Elastic Net", "PCR", "PLS"),
+  RMSE = c(
+    ridge_metrics["RMSE"],
+    lasso_metrics["RMSE"],
+    elastic_metrics["RMSE"],
+    rmse_pcr,
+    rmse_pls
+  ),
+  Rsquared = c(
+    ridge_metrics["Rsquared"],
+    lasso_metrics["Rsquared"],
+    elastic_metrics["Rsquared"],
+    r2_pcr,
+    r2_pls
+  ),
+  MAE = c(
+    ridge_metrics["MAE"],
+    lasso_metrics["MAE"],
+    elastic_metrics["MAE"],
+    mae_pcr,
+    mae_pls
+  )
+)
+
+# Affichage de la table de synthèse
+print(performance_all)
+
+```
+
+```{r}
+performance_long <- pivot_longer(performance_all, cols = c("RMSE", "Rsquared", "MAE"),
+                                 names_to = "Metric", values_to = "Value")
+
+ggplot(performance_long, aes(x = Modèle, y = Value, fill = Modèle)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ Metric, scales = "free_y") +
+  theme_minimal(base_size = 13) +
+  labs(title = "Comparaison des performances des modèles",
+       y = NULL, x = NULL)
+
+```
+
+On cherche le meilleur modèle en admettant que toutes ces métriques aient un poids égal.
+
+```{r}
+# Création d'un score global basé sur RMSE, R² et MAE
+performance_all$Score <- with(performance_all,
+  (RMSE / max(RMSE)) + (1 - Rsquared / max(Rsquared)) + (MAE / max(MAE))
+)
+
+# Trouver le modèle avec le score minimal (meilleur score)
+best_model <- performance_all[which.min(performance_all$Score), ]
+
+# Afficher les performances du meilleur modèle
+print(best_model)
+
+```
+
+Dans cette étude, nous avons traité la multicolinéarité à l’aide de différentes approches de régression pénalisée, telles que **Ridge**, **Lasso**, et **Elastic Net**, tout en comparant leurs performances avec des méthodes de régression multivariée comme **PCR** et **PLS**. L'objectif était de prédire l'espérance de vie en fonction de variables socio-économiques et environnementales, tout en surmontant les problèmes de multicolinéarité qui peuvent fausser les résultats.
+
+Nous avons identifié la multicolinéarité via la matrice de corrélation et le **Variance Inflation Factor** (VIF), ce qui a confirmé des relations fortes entre certaines variables explicatives. Cela a mis en évidence la nécessité d'utiliser des modèles de régression pénalisée pour éviter l'overfitting et améliorer la stabilité des estimations.
+
+Après avoir évalué les modèles sur des critères de performance comme le **RMSE**, le **R²** et le **MAE**, le modèle **Lasso** s'est révélé le plus performant, offrant une bonne généralisation avec un faible **RMSE** (0.4748), un **R²** élevé (0.8141) et un **MAE** réduit. Bien que **Elastic Net** ait également montré de bons résultats, il a légèrement sous-performé par rapport à **Lasso**, tandis que **Ridge** a été moins efficace, en raison de sa tendance à conserver toutes les variables dans le modèle.
+
+En conclusion, l’utilisation de régressions pénalisées a permis de surmonter la multicolinéarité et d'améliorer les prédictions. **Lasso** a été le modèle le plus adapté pour cette analyse, grâce à sa capacité à éliminer les variables non significatives tout en fournissant des résultats robustes et interprétables. Ces méthodes offrent une approche efficace et flexible pour traiter des problèmes complexes, comme la prédiction de l'espérance de vie.
 
 # Double Machine Learning
+
+## Objectif
+
+L'objectif de cette section est d'estimer l'effet causal des dépenses de santé sur l'espérance de vie en utilisant la méthode du Double Machine Learning (DML). Cette approche permet de corriger les biais liés à l'endogénéité tout en utilisant des méthodes de machine learning capables de gérer des relations complexes et potentiellement non linéaires entre les variables explicatives.
+
+Contrairement aux méthodes économétriques traditionnelles (comme les MCO ou 2SLS), le DML autorise un grand nombre de covariables, utilise des algorithmes de machine learning pour modéliser les composantes de nuisance, et conserve une interprétabilité causale grâce à la construction orthogonale des scores. L'orthogonalité des scores permet de séparer les effets des variables de traitement et de nuisance, assurant ainsi une estimation non biaisée et convergente. De plus, le DML produit des estimateurs robustes, notamment grâce à l’utilisation de la régularisation qui limite le surajustement, même avec un grand nombre de covariables.
+
+Cette partie prolonge logiquement notre traitement précédent de l'endogénéité via la méthode des doubles moindres carrés (2SLS). Alors que 2SLS repose sur des hypothèses linéaires et un nombre limité de covariables, le DML permet de relâcher ces contraintes tout en maintenant une estimation causale valide. L'utilisation des mêmes variables (la variable de traitement: Health_Expenditure_log, les variables instrumentales : Corruption, Population_65, les variables de contrôle : GDP_log, Education, Pollution) garantit une comparaison directe des résultats et permet de tester la robustesse des estimations en relâchant les hypothèses traditionnelles de linéarité.
+
+## Préparation des données
+
+On sélectionne les variables pertinentes du modèle : - Life_Expectancy : variable à expliquer (Y) - Health_Expenditure_log : traitement (D) - GDP_log, Education, Pollution : covariables (X) - Corruption, Population_65 : instruments (Z)
+
+```{r message=FALSE, warning=FALSE}
+library(AER)
+library(ranger)
+library(mlr3verse)
+library(DoubleML)
+
+data_dml <- data %>%
+  select(Life_Expectancy, Health_Expenditure_log, GDP_log, Education, Pollution, Corruption, Population_65) %>%
+  drop_na()
+
+data_dml <- as.data.frame(data_dml)
+
+X <- c("GDP_log", "Education", "Pollution")
+Z <- c("Corruption", "Population_65")
+
+dml_data <- DoubleMLData$new(
+  data = data_dml,
+  y_col = "Life_Expectancy",
+  d_cols = "Health_Expenditure_log",
+  x_cols = X,
+  z_cols = Z
+)
+
+task <- TaskRegr$new(id = "life_expectancy", backend = data_dml, target = "Life_Expectancy")
+```
+
+## Définition des modèles de forêt aléatoire pour les fonctions de nuisance
+
+Nous utilisons ici des forêts aléatoires (ranger) pour estimer les fonctions de nuisance (g, m, r) car elles sont puissantes, flexibles, et adaptées à des relations complexes.
+
+```{r}
+# Définir les modèles avec ranger
+learner_g <- lrn("regr.ranger", num.trees = 500, importance = "impurity")
+learner_m <- lrn("regr.ranger", num.trees = 500, importance = "impurity")
+learner_r <- lrn("regr.ranger", num.trees = 500, importance = "impurity")
+
+# Entraîner les modèles
+learner_g$train(task)
+learner_m$train(task)
+learner_r$train(task)
+
+```
+
+## Entraînement des modèles sur les données
+
+```{r}
+# Extraire les modèles ajustés
+model_g <- learner_g$model
+model_m <- learner_m$model
+model_r <- learner_r$model
+
+# Extraire l'importance des variables
+importance_g <- ranger::importance(model_g)
+importance_m <- ranger::importance(model_m)
+importance_r <- ranger::importance(model_r)
+```
+
+## Visualisation de l'importance des données
+
+```{r}
+# Convertir les importances en un data frame
+importance_g_df <- data.frame(
+  Variable = names(importance_g),
+  Importance = importance_g
+)
+
+importance_m_df <- data.frame(
+  Variable = names(importance_m),
+  Importance = importance_m
+)
+
+importance_r_df <- data.frame(
+  Variable = names(importance_r),
+  Importance = importance_r
+)
+
+# Graphique pour le modèle g
+ggplot(importance_g_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +
+  labs(title = "Importance des Variables - Modèle g", x = "Variable", y = "Importance") +
+  theme_minimal()
+
+# Graphique pour le modèle m
+ggplot(importance_m_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "green") +
+  coord_flip() +
+  labs(title = "Importance des Variables - Modèle m", x = "Variable", y = "Importance") +
+  theme_minimal()
+
+# Graphique pour le modèle r
+ggplot(importance_r_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Importance des Variables - Modèle r", x = "Variable", y = "Importance") +
+  theme_minimal()
+
+
+```
+
+Ces modèles permettent de neutraliser les biais potentiels dans l'estimation de l'effet causal de la variable de traitement (Health_Expenditure_log) sur la variable de résultat (Life_Expectancy). L'importance des variables est une mesure qui indique dans quelle mesure chaque variable explicative influence l'estimation du modèle. Les résultats montrent que l'importance des variables dans les trois modèles est assez similaire.
+
+## Interprétation de la similitude dans les importances des variables
+
+1.  **Indication de relations similaires** : Le fait que les importances des variables dans les trois modèles (g, m, r) soient semblables suggère que les relations entre les variables explicatives (comme GDP_log, Education, Pollution, etc.) et la variable de résultat (Life_Expectancy) sont relativement stables, quel que soit le modèle utilisé pour estimer les fonctions de nuisance. Autrement dit, les modèles g, m, et r, bien que structurés différemment, traitent les mêmes variables de manière similaire en termes de leur influence sur le résultat. Cela pourrait signifier que les variables de contrôle et d'instrumentation ont des effets similaires à travers les différents aspects de l'estimation.
+
+2.  **Absence de surajustement ou de biais de modèle** : Lorsque l'importance des variables est similaire dans tous les modèles, cela indique qu'il n'y a pas de surajustement important ou de biais lié à l'une des fonctions de nuisance. Les forêts aléatoires, étant des modèles non paramétriques et flexibles, ont réussi à capturer les relations complexes sans donner un poids disproportionné à une seule variable dans l'un des modèles par rapport aux autres.
+
+3.  **Cohérence dans l'impact des variables** : L'importance similaire des variables suggère également qu'il n'y a pas de déconnexion ou d'instabilité dans l'impact des variables de contrôle et des instruments. Cela peut être un signe de robustesse dans la structure du modèle et de la méthode DML, puisque les mêmes variables jouent un rôle similaire dans les différentes étapes d'estimation. Cela renforce l'idée que les instruments et les variables de contrôle sont bien choisis et qu'ils exercent une influence cohérente sur la prédiction de l'espérance de vie.
+
+## Conséquences pour l'estimation causale
+
+Le fait que l'importance des variables soit similaire dans tous les modèles est également un bon signe pour l'estimation causale. Cela indique que les variables, qu'elles soient de traitement, de contrôle ou instrumentales, n'ont pas des effets contradictoires ou incohérents dans les différentes phases de l'analyse. La méthode DML semble donc être bien calibrée pour isoler l'effet causal des dépenses de santé sur l'espérance de vie, sans que les fonctions de nuisance n'introduisent des distorsions importantes.
+
+En conclusion, la similitude dans l'importance des variables à travers les trois modèles suggère que les résultats obtenus par DML sont robustes et cohérents. Les variables jouent un rôle stable, ce qui renforce la validité des conclusions causales obtenues.
+
+## Estimation du modèle
+
+```{r}
+dml_model <- DoubleMLPLIV$new(dml_data, ml_g, ml_m, ml_r)
+dml_model$fit()
+```
+
+## Résultats et interprétation
+
+```{r}
+dml_results <- dml_model$summary()
+print(dml_results)
+```
+
+Les résultats du modèle de Double Machine Learning (DML) vous permettent d'estimer l'effet causal des dépenses de santé (Health_Expenditure_log) sur l'espérance de vie (Life_Expectancy). Voici une interprétation détaillée des résultats :
+
+### Estimation de l'effet causal
+
+-   **Estimation de l'effet de Health_Expenditure_log** : L'estimation de l'effet causal des dépenses de santé sur l'espérance de vie est **7.124** (ou 7.1236 dans le détail des résultats). Cela signifie qu'une augmentation d'une unité dans les dépenses de santé logarithmiques (Health_Expenditure_log) est associée à une augmentation de 7.124 ans (ou 7.12 ans) de l'espérance de vie, toutes choses égales par ailleurs.
+
+### Erreur standard
+
+-   **Erreur standard** : L'erreur standard associée à cette estimation est **1.744**, ce qui reflète la variabilité de l'estimation de l'effet. Une erreur standard relativement faible par rapport à l'estimation elle-même indique que l'estimation est relativement précise et que l'effet estimé est stable.
+
+### Test de significativité
+
+-   **Valeur t** : La valeur t associée à cette estimation est **4.086**, ce qui mesure la taille de l'effet en termes de l'erreur standard. Une valeur t plus grande que 2 suggère généralement que l'estimation est significativement différente de zéro, ce qui est bien le cas ici.
+
+-   **Valeur p** : La valeur p associée à l'estimation est **4.4e-05** (soit 0.000044), ce qui est très inférieur au seuil de 0.05. Cela indique que l'effet de **Health_Expenditure_log** sur **Life_Expectancy** est hautement significatif sur le plan statistique. En d'autres termes, il y a très peu de chance que cet effet soit dû au hasard.
+
+## Conclusion DML
+
+En résumé, les résultats montrent que **l'effet des dépenses de santé sur l'espérance de vie est statistiquement significatif et relativement important**. L'estimation indique que chaque augmentation d'une unité dans les dépenses de santé logarithmiques entraîne une augmentation de l'espérance de vie d'environ 7.12 ans. De plus, l'erreur standard faible et la valeur p très significative renforcent la robustesse de cette estimation.
+
+Cette estimation montre donc qu'il existe un lien causal substantiel entre les dépenses de santé et l'espérance de vie, ce qui peut être crucial pour les politiques publiques liées à la santé.
+
+La méthode DML permet ainsi ici d'obtenir une estimation robuste de l'effet des dépenses de santé sur l'espérance de vie :
+
+\- Elle corrige pour l'endogénéité sans dépendre uniquement des hypothèses linéaires,
+
+\- Elle utilise des modèles flexibles (ML) pour améliorer la prédiction des composantes de nuisance,
+
+\- Elle garantit une estimation causale et interprétable de l'effet du traitement, même en présence de nombreuses variables explicatives.
+
+Cette approche vient compléter les méthodes classiques précédemment utilisées dans ce projet. Elle conforte les résultats obtenus avec le 2SLS et montre qu’un cadre plus souple, intégrant les capacités du machine learning, peut renforcer la robustesse des inférences causales en économie de la santé.
 
 # Conclusion
