@@ -585,7 +585,7 @@ Y_test<- as.matrix(train.data[, c("Life_Expectancy")])
 X_test<- as.matrix(train.data[,c("Corruption", "Education", "Pollution", "Population_65", "GDP_log", "Health_Expenditure_log")])
 ```
 
-### Estimation avec la méthode Ridge 
+### Estimation avec la méthode Ridge
 
 ```{r}
 ridge_glmnet <- glmnet(X_train, Y_train, family ="gaussian", alpha =0)
